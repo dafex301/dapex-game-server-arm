@@ -1,0 +1,26 @@
+# Installed as /etc/default/valheim-watchdog by monitoring/install.sh.
+CONTAINER_NAME=valheim
+SERVER_DIR=/home/ubuntu/valheim-server-arm
+STATE_FILE=/var/lib/valheim-watchdog/state.json
+LOCK_FILE=/var/lib/valheim-watchdog/watchdog.lock
+MAINTENANCE_LOCK_FILE=/home/ubuntu/valheim-server-arm/.maintenance.lock
+
+# Optional dead-man heartbeat URL (for example Healthchecks.io). It is pinged
+# after every completed check regardless of game status. Leave blank initially.
+HOST_HEARTBEAT_URL=
+HEARTBEAT_TIMEOUT_SECONDS=10
+
+# Steam validation can make a legitimate cold start slow.
+STARTUP_GRACE_SECONDS=900
+
+# At most three recoveries in one hour, with exponential delay between attempts.
+RESTART_WINDOW_SECONDS=3600
+MAX_RESTARTS_PER_WINDOW=3
+BACKOFF_BASE_SECONDS=60
+BACKOFF_MAX_SECONDS=900
+
+# Extended regular expressions matched by `pgrep -f` inside the container and
+# against current-start logs.
+PROCESS_REGEX='valheim_server'
+READY_REGEX='Session .* with join code .* is active|Game server connected|PlayFab.*active'
+JOIN_CODE_REGEX='join code[^0-9]*[0-9]+'

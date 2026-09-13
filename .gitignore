@@ -1,0 +1,7 @@
+.env
+server/
+persistentdata/
+backups/
+.maintenance.lock
+*.zip
+.DS_Store

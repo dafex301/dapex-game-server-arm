@@ -1,0 +1,23 @@
+[Unit]
+Description=Valheim Discord operations bot
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=docker
+WorkingDirectory=/home/ubuntu/valheim-server-arm/discord
+EnvironmentFile=/home/ubuntu/valheim-server-arm/discord/.env
+Environment=PATH=/home/ubuntu/.nvm/versions/node/v20.20.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+ExecStart=/home/ubuntu/.nvm/versions/node/v20.20.0/bin/node /home/ubuntu/valheim-server-arm/discord/src/index.js
+Restart=always
+RestartSec=5
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/valheim-server-arm/discord /home/ubuntu/valheim-server-arm/backups /home/ubuntu/valheim-server-arm/persistentdata /home/ubuntu/valheim-server-arm/.maintenance.lock
+
+[Install]
+WantedBy=multi-user.target

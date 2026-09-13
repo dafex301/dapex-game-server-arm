@@ -1,0 +1,19 @@
+{
+  "name": "valheim-discord-ops",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Discord status and operations bot for the local Valheim server",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "check": "node --check src/index.js && node --check src/valheim.js && node --check src/render.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "discord.js": "14.27.0",
+    "dotenv": "16.4.7"
+  }
+}

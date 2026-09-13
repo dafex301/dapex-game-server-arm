@@ -1,0 +1,21 @@
+[Unit]
+Description=Valheim container and PlayFab health watchdog
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/valheim-watchdog
+User=root
+Group=root
+UMask=0022
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+# Logs go to journald. Recovery needs Docker and the deployment directory.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

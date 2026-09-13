@@ -1,0 +1,329 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+# A single-shot Valheim health check. systemd runs this from a timer.
+# The config file is trusted shell syntax and must only be writable by root.
+
+CONFIG_FILE="${VALHEIM_WATCHDOG_CONFIG:-/etc/default/valheim-watchdog}"
+STATE_FILE_OVERRIDE=""
+DRY_RUN=false
+
+usage() {
+  cat <<'EOF'
+Usage: valheim-watchdog [--config PATH] [--state-file PATH] [--dry-run]
+
+Checks once, writes an atomic JSON status file, and exits. --dry-run reports the
+recovery action it would take without changing Docker or consuming retry budget.
+EOF
+}
+
+while (($#)); do
+  case "$1" in
+    --config) CONFIG_FILE=${2:?--config requires a path}; shift 2 ;;
+    --state-file) STATE_FILE_OVERRIDE=${2:?--state-file requires a path}; shift 2 ;;
+    --dry-run) DRY_RUN=true; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+if [[ -f "$CONFIG_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$CONFIG_FILE"
+fi
+
+CONTAINER_NAME=${CONTAINER_NAME:-valheim}
+SERVER_DIR=${SERVER_DIR:-/home/ubuntu/valheim-server-arm}
+STATE_FILE=${STATE_FILE_OVERRIDE:-${STATE_FILE:-/var/lib/valheim-watchdog/state.json}}
+LOCK_FILE=${LOCK_FILE:-/var/lib/valheim-watchdog/watchdog.lock}
+MAINTENANCE_LOCK_FILE=${MAINTENANCE_LOCK_FILE:-${SERVER_DIR}/.maintenance.lock}
+HOST_HEARTBEAT_URL=${HOST_HEARTBEAT_URL:-}
+HEARTBEAT_TIMEOUT_SECONDS=${HEARTBEAT_TIMEOUT_SECONDS:-10}
+STARTUP_GRACE_SECONDS=${STARTUP_GRACE_SECONDS:-900}
+RESTART_WINDOW_SECONDS=${RESTART_WINDOW_SECONDS:-3600}
+MAX_RESTARTS_PER_WINDOW=${MAX_RESTARTS_PER_WINDOW:-3}
+BACKOFF_BASE_SECONDS=${BACKOFF_BASE_SECONDS:-60}
+BACKOFF_MAX_SECONDS=${BACKOFF_MAX_SECONDS:-900}
+PROCESS_REGEX=${PROCESS_REGEX:-'valheim_server'}
+READY_REGEX=${READY_REGEX:-'Session .* with join code .* is active|Game server connected|PlayFab.*active'}
+JOIN_CODE_REGEX=${JOIN_CODE_REGEX:-'join code[^0-9]*[0-9]+'}
+
+for value in STARTUP_GRACE_SECONDS RESTART_WINDOW_SECONDS MAX_RESTARTS_PER_WINDOW BACKOFF_BASE_SECONDS BACKOFF_MAX_SECONDS HEARTBEAT_TIMEOUT_SECONDS; do
+  [[ ${!value} =~ ^[0-9]+$ ]] || { echo "$value must be a non-negative integer" >&2; exit 2; }
+done
+
+mkdir -p "$(dirname "$STATE_FILE")" "$(dirname "$LOCK_FILE")" "$(dirname "$MAINTENANCE_LOCK_FILE")"
+if ! exec 9>"$LOCK_FILE"; then
+  echo "valheim-watchdog: cannot open check lock: $LOCK_FILE" >&2
+  exit 1
+fi
+if ! flock -n 9; then
+  echo "valheim-watchdog: another check is still running" >&2
+  exit 0
+fi
+if ! exec 8>"$MAINTENANCE_LOCK_FILE"; then
+  echo "valheim-watchdog: cannot open maintenance lock: $MAINTENANCE_LOCK_FILE" >&2
+  exit 1
+fi
+
+now=$(date +%s)
+observed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+previous_status=unknown
+status_changed_at=$observed_at
+restart_window_started_at=$now
+restart_attempts=0
+consecutive_failures=0
+last_restart_at=0
+next_action_at=0
+previous_container_started_at=""
+previous_playfab_ready=false
+previous_join_code=""
+
+if [[ -s "$STATE_FILE" ]]; then
+  prior=$(python3 - "$STATE_FILE" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    d = json.load(open(sys.argv[1], encoding="utf-8"))
+    vals = [
+        d.get("status", "unknown"), d.get("status_changed_at", ""),
+        d.get("recovery", {}).get("window_started_at", 0) or 0,
+        d.get("recovery", {}).get("attempts_in_window", 0) or 0,
+        d.get("recovery", {}).get("consecutive_failures", 0) or 0,
+        d.get("recovery", {}).get("last_restart_at", 0) or 0,
+        d.get("recovery", {}).get("next_action_at", 0) or 0,
+        d.get("container", {}).get("started_at", "") or "",
+        d.get("checks", {}).get("playfab_ready", False),
+        d.get("connection", {}).get("join_code", "") or "",
+    ]
+    print("|".join(str(v).replace("|", " ").replace("\n", " ") for v in vals))
+except Exception:
+    pass
+PY
+  )
+  if [[ -n "$prior" ]]; then
+    IFS='|' read -r previous_status status_changed_at restart_window_started_at restart_attempts consecutive_failures last_restart_at next_action_at previous_container_started_at previous_playfab_ready previous_join_code <<<"$prior"
+    case "$previous_playfab_ready" in True|true|1) previous_playfab_ready=true ;; *) previous_playfab_ready=false ;; esac
+  fi
+fi
+
+if (( now - restart_window_started_at >= RESTART_WINDOW_SECONDS || now < restart_window_started_at )); then
+  restart_window_started_at=$now
+  restart_attempts=0
+fi
+
+status=unknown
+reason="health check has not completed"
+action=none
+container_exists=false
+container_running=false
+process_ready=false
+playfab_ready=false
+container_health=none
+container_started_at=""
+container_uptime_seconds=0
+join_code=""
+
+log() { echo "valheim-watchdog: $*"; }
+
+write_state() {
+  if [[ "$status" != "$previous_status" || -z "$status_changed_at" ]]; then
+    status_changed_at=$observed_at
+  fi
+  local tmp
+  tmp=$(mktemp "${STATE_FILE}.tmp.XXXXXX")
+  STATUS=$status REASON=$reason ACTION=$action OBSERVED_AT=$observed_at \
+  STATUS_CHANGED_AT=$status_changed_at CONTAINER_NAME=$CONTAINER_NAME \
+  CONTAINER_EXISTS=$container_exists CONTAINER_RUNNING=$container_running \
+  PROCESS_READY=$process_ready PLAYFAB_READY=$playfab_ready \
+  CONTAINER_HEALTH=$container_health CONTAINER_STARTED_AT=$container_started_at \
+  CONTAINER_UPTIME_SECONDS=$container_uptime_seconds JOIN_CODE=$join_code \
+  WINDOW_STARTED_AT=$restart_window_started_at ATTEMPTS=$restart_attempts \
+  MAX_ATTEMPTS=$MAX_RESTARTS_PER_WINDOW CONSECUTIVE_FAILURES=$consecutive_failures \
+  LAST_RESTART_AT=$last_restart_at NEXT_ACTION_AT=$next_action_at DRY_RUN=$DRY_RUN \
+  python3 - "$tmp" <<'PY'
+import json, os, sys
+def b(name): return os.environ[name].lower() == "true"
+def i(name):
+    try: return int(os.environ[name])
+    except (KeyError, ValueError): return 0
+d = {
+  "schema_version": 1,
+  "status": os.environ["STATUS"],
+  "reason": os.environ["REASON"],
+  "action": os.environ["ACTION"],
+  "observed_at": os.environ["OBSERVED_AT"],
+  "status_changed_at": os.environ["STATUS_CHANGED_AT"],
+  "dry_run": b("DRY_RUN"),
+  "container": {
+    "name": os.environ["CONTAINER_NAME"],
+    "exists": b("CONTAINER_EXISTS"),
+    "running": b("CONTAINER_RUNNING"),
+    "health": os.environ["CONTAINER_HEALTH"],
+    "started_at": os.environ["CONTAINER_STARTED_AT"],
+    "uptime_seconds": i("CONTAINER_UPTIME_SECONDS"),
+  },
+  "checks": {
+    "valheim_process": b("PROCESS_READY"),
+    "playfab_ready": b("PLAYFAB_READY"),
+  },
+  "connection": {"join_code": os.environ["JOIN_CODE"] or None},
+  "recovery": {
+    "window_started_at": i("WINDOW_STARTED_AT"),
+    "attempts_in_window": i("ATTEMPTS"),
+    "max_attempts_per_window": i("MAX_ATTEMPTS"),
+    "consecutive_failures": i("CONSECUTIVE_FAILURES"),
+    "last_restart_at": i("LAST_RESTART_AT") or None,
+    "next_action_at": i("NEXT_ACTION_AT") or None,
+  },
+}
+with open(sys.argv[1], "w", encoding="utf-8") as f:
+    json.dump(d, f, separators=(",", ":"), sort_keys=True)
+    f.write("\n")
+PY
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$STATE_FILE"
+  log "status=$status action=$action reason=$reason"
+  if [[ -n "$HOST_HEARTBEAT_URL" ]]; then
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsS --max-time "$HEARTBEAT_TIMEOUT_SECONDS" -o /dev/null "$HOST_HEARTBEAT_URL" || log "external host heartbeat failed"
+    else
+      log "external host heartbeat configured but curl is unavailable"
+    fi
+  fi
+}
+
+schedule_recovery() {
+  local recovery_kind=$1
+  consecutive_failures=$((consecutive_failures + 1))
+
+  if (( restart_attempts >= MAX_RESTARTS_PER_WINDOW )); then
+    status=down
+    action=cooldown
+    next_action_at=$((restart_window_started_at + RESTART_WINDOW_SECONDS))
+    reason="$reason; automatic recovery budget exhausted"
+    return
+  fi
+  if (( now < next_action_at )); then
+    status=down
+    action=backoff
+    reason="$reason; waiting for recovery backoff"
+    return
+  fi
+
+  if [[ "$DRY_RUN" == true ]]; then
+    status=down
+    action="would_${recovery_kind}"
+    reason="$reason; dry-run did not change Docker"
+    return
+  fi
+
+  local ok=false
+  case "$recovery_kind" in
+    create)
+      if [[ -r "$SERVER_DIR/image.txt" && -x "$SERVER_DIR/scripts/start.sh" ]]; then
+        image_ref=$(<"$SERVER_DIR/image.txt")
+        (cd "$SERVER_DIR" && VALHEIM_IMAGE="$image_ref" ./scripts/start.sh) && ok=true
+      fi
+      ;;
+    start) docker start "$CONTAINER_NAME" >/dev/null && ok=true ;;
+    restart) docker restart -t 120 "$CONTAINER_NAME" >/dev/null && ok=true ;;
+  esac
+
+  restart_attempts=$((restart_attempts + 1))
+  last_restart_at=$now
+  delay=$((BACKOFF_BASE_SECONDS * (1 << (restart_attempts - 1))))
+  (( delay > BACKOFF_MAX_SECONDS )) && delay=$BACKOFF_MAX_SECONDS
+  next_action_at=$((now + delay))
+  if [[ "$ok" == true ]]; then
+    status=restarting
+    action=$recovery_kind
+    reason="automatic recovery initiated: $recovery_kind"
+  else
+    status=down
+    action="${recovery_kind}_failed"
+    reason="automatic recovery command failed: $recovery_kind"
+  fi
+}
+
+# Backup and operator workflows take this lock exclusively. Maintenance remains
+# visible to consumers but is never mistaken for an outage and auto-repaired.
+if ! flock -sn 8; then
+  status=maintenance
+  reason="an operator or backup job holds the maintenance lock"
+  action=none
+  write_state
+  exit 0
+fi
+
+if ! command -v docker >/dev/null 2>&1; then
+  status=unknown
+  reason="docker command is unavailable"
+  consecutive_failures=$((consecutive_failures + 1))
+  write_state
+  exit 1
+fi
+
+if ! docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
+  reason="container does not exist"
+  schedule_recovery create
+  write_state
+  [[ "$status" == restarting ]] && exit 0 || exit 1
+fi
+container_exists=true
+
+inspect=$(docker inspect -f '{{.State.Running}}|{{.State.StartedAt}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$CONTAINER_NAME" 2>/dev/null || true)
+IFS='|' read -r running_value container_started_at container_health <<<"$inspect"
+if [[ "$running_value" != true ]]; then
+  reason="container is stopped"
+  schedule_recovery start
+  write_state
+  [[ "$status" == restarting ]] && exit 0 || exit 1
+fi
+container_running=true
+
+started_epoch=$(date -d "$container_started_at" +%s 2>/dev/null || echo "$now")
+container_uptime_seconds=$((now - started_epoch))
+(( container_uptime_seconds < 0 )) && container_uptime_seconds=0
+
+if docker exec "$CONTAINER_NAME" pgrep -f "$PROCESS_REGEX" >/dev/null 2>&1; then
+  process_ready=true
+fi
+
+# Cache readiness for this exact container start. A marker can rotate out of the
+# Docker log, so its later absence must not turn a healthy server into an outage.
+if [[ "$container_started_at" == "$previous_container_started_at" ]]; then
+  [[ "$previous_playfab_ready" == true ]] && playfab_ready=true
+  [[ -n "$previous_join_code" ]] && join_code=$previous_join_code
+fi
+if [[ "$playfab_ready" != true || -z "$join_code" ]]; then
+  logs=$(docker logs --tail 2000 --since "$container_started_at" "$CONTAINER_NAME" 2>&1 || true)
+  if grep -Eqi "$READY_REGEX" <<<"$logs"; then playfab_ready=true; fi
+  found_join_code=$(grep -Eio "$JOIN_CODE_REGEX" <<<"$logs" | tail -n 1 | grep -Eo '[0-9]+' | tail -n 1 || true)
+  [[ -n "$found_join_code" ]] && join_code=$found_join_code
+fi
+
+if [[ "$container_health" == unhealthy ]]; then
+  reason="Docker health check reports unhealthy"
+  schedule_recovery restart
+elif [[ "$process_ready" == true && "$playfab_ready" == true ]]; then
+  status=online
+  reason="Valheim process is running and PlayFab session is active"
+  action=none
+  consecutive_failures=0
+  next_action_at=0
+elif (( container_uptime_seconds < STARTUP_GRACE_SECONDS )); then
+  status=starting
+  reason="waiting for Valheim process and PlayFab readiness within startup grace"
+  action=none
+else
+  if [[ "$process_ready" != true ]]; then
+    reason="container is running but the Valheim server process is missing"
+  else
+    reason="Valheim process is running but PlayFab readiness was not observed"
+  fi
+  schedule_recovery restart
+fi
+
+write_state
+[[ "$status" == online || "$status" == starting || "$status" == restarting ]] && exit 0
+exit 1
