@@ -84,7 +84,9 @@ assert_json action restart
 # Startup grace suppresses recovery while Steam/Wine/Valheim are still loading.
 sed 's/STARTUP_GRACE_SECONDS=0/STARTUP_GRACE_SECONDS=900/' "$tmp/config" >"$tmp/config-grace"
 rm -f "$state"
-FAKE_PROCESS_READY=false FAKE_LOGS=x VALHEIM_WATCHDOG_CONFIG=$tmp/config-grace "$watchdog" --state-file "$state"
+FAKE_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  FAKE_PROCESS_READY=false FAKE_LOGS=x \
+  VALHEIM_WATCHDOG_CONFIG=$tmp/config-grace "$watchdog" --state-file "$state"
 assert_json status starting
 assert_json recovery.attempts_in_window 0
 
