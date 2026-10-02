@@ -1,9 +1,9 @@
 import { run, runOptional } from './process.js';
 
-export async function inspectContainer(name) {
-  const output = await runOptional('docker', ['inspect', name], { allowedExitCodes: [1] });
+export function inspectContainerResult(name, output) {
   if (!output) return { name, exists: false, running: false };
   const [inspect] = JSON.parse(output);
+  if (!inspect) return { name, exists: false, running: false };
   return {
     name,
     exists: true,
@@ -16,6 +16,11 @@ export async function inspectContainer(name) {
     cpuLimit: inspect.HostConfig?.NanoCpus ? inspect.HostConfig.NanoCpus / 1_000_000_000 : null,
     image: inspect.Config?.Image || null,
   };
+}
+
+export async function inspectContainer(name) {
+  const output = await runOptional('docker', ['inspect', name], { allowedExitCodes: [1] });
+  return inspectContainerResult(name, output);
 }
 
 export async function containerStats(name) {
