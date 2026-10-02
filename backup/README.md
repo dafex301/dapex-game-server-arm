@@ -21,8 +21,7 @@ Install `restic`, then from the repository root:
 
 ```bash
 sudo ./backup/install.sh
-sudoedit /etc/dapex-game-backup.env
-sudo sh -c 'umask 077; openssl rand -base64 48 > /etc/dapex-game-backup.password'
+sudo ./backup/configure-r2.sh
 sudo systemctl start dapex-offsite-backup-init.service
 sudo systemctl start dapex-offsite-backup.service
 sudo systemctl enable --now dapex-offsite-backup.timer dapex-offsite-backup-maintenance.timer
@@ -37,6 +36,13 @@ For Cloudflare R2, create a private bucket and an R2 API token restricted to
 Object Read & Write for that bucket. Set the S3 repository URL and the
 `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_DEFAULT_REGION=auto`
 variables shown in `restic.env.example`.
+
+On the prepared `wa-bot` host, enter the one-time R2 values without putting
+them in shell history or process arguments:
+
+```bash
+ssh -t wa-bot 'cd ~/valheim-server-arm && sudo ./backup/configure-r2.sh'
+```
 
 ## Operations
 
@@ -61,4 +67,3 @@ The daily timer runs at 04:15 Asia/Jakarta. The weekly timer applies retention
 (7 daily, 5 weekly, 12 monthly, 2 yearly by default), prunes unreferenced data,
 and reads a random 5% of repository data. Set `RESTIC_CHECK_SUBSET=100%` for a
 full check during a planned maintenance window.
-
