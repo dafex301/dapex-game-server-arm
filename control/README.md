@@ -43,6 +43,9 @@ RCON password. `GAME_DEPLOY_DIR` must match the checkout location. Then run:
 ./control/install.sh
 ```
 
+To enter the CurseForge key without shell history or chat, use
+`./control/set-curseforge-key.sh`, then restart `dapex-game-control`.
+
 The installer snapshots the currently observed active game into controller state
 before changing Valheim's Docker restart policy. It installs but does not start
 the web service. After configuring Access and Tunnel, start it explicitly:
