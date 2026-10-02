@@ -18,3 +18,17 @@ test('game control authenticates and sends a bounded switch target', async () =>
   assert.deepEqual(JSON.parse(observed[0].options.body), { target: 'minecraft' });
   assert.equal(observed[1].url, 'http://127.0.0.1:8787/api/admin/operations/operation-1');
 });
+
+test('whitelist uses the bounded controller API and validates usernames', async () => {
+  const observed = [];
+  const fetchImpl = async (url, options) => {
+    observed.push({ url: String(url), options });
+    return { ok: true, json: async () => ({ message: 'Added Alex' }) };
+  };
+  const client = createGameControl({ controlApiUrl: 'http://127.0.0.1:8787', controlApiToken: 'secret' }, fetchImpl);
+  await client.minecraftWhitelist('add', 'Alex');
+  assert.equal(observed[0].url, 'http://127.0.0.1:8787/api/admin/minecraft/whitelist');
+  assert.equal(observed[0].options.method, 'POST');
+  assert.deepEqual(JSON.parse(observed[0].options.body), { username: 'Alex' });
+  assert.throws(() => client.minecraftWhitelist('remove', 'bad;name'), /username/);
+});

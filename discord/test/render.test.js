@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { memoryWarningEmbed, statusEmbed, transitionEmbed } from '../src/render.js';
+import { gameStatusEmbed, memoryWarningEmbed, statusEmbed, transitionEmbed } from '../src/render.js';
 
 const base = {
   serverName: 'mbg enak',
@@ -51,4 +51,16 @@ test('memory warning shows usage and threshold', () => {
   assert.match(data.title, /memory warning/i);
   assert.match(data.description, /7\.20 GiB/);
   assert.ok(data.fields.some((field) => field.name === 'Players' && field.value === '4'));
+});
+
+test('unified Minecraft status shows release, address, and client pack', () => {
+  const data = gameStatusEmbed({
+    game: 'minecraft', state: 'online', playerCount: 2, maxPlayers: 10,
+    releaseName: 'Dapex Fabric v3', memory: '1 GiB / 7 GiB', cpu: '5%',
+    address: 'mc.example.com', portalUrl: 'https://play.example.com', checkedAt: new Date(),
+  }).toJSON();
+  assert.match(data.title, /Minecraft/);
+  assert.ok(data.fields.some((field) => field.name === 'Release' && field.value === 'Dapex Fabric v3'));
+  assert.ok(data.fields.some((field) => field.name === 'Address' && /mc\.example\.com/.test(field.value)));
+  assert.ok(data.fields.some((field) => field.name === 'Client pack' && /play\.example\.com/.test(field.value)));
 });

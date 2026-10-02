@@ -66,5 +66,8 @@ export function loadConfig() {
     watchdogMaxAgeMs: positiveInteger('WATCHDOG_MAX_AGE_SECONDS', 180, 30) * 1000,
     controlApiUrl: process.env.GAME_CONTROL_API_URL?.trim() || null,
     controlApiToken: process.env.GAME_CONTROL_API_TOKEN?.trim() || null,
+    minecraftContainer: process.env.MINECRAFT_CONTAINER?.trim() || 'minecraft',
+    minecraftAddress: process.env.MINECRAFT_ADDRESS?.trim() || 'mc.fahrelgibran.com',
+    playerPortalUrl: process.env.PLAYER_PORTAL_URL?.trim() || 'https://play.server.fahrelgibran.com',
   });
 }

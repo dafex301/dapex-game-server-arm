@@ -1,0 +1,20 @@
+[Unit]
+Description=Dapex game server consistent off-host backup
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@SERVICE_USER@
+Group=@SERVICE_USER@
+SupplementaryGroups=docker
+WorkingDirectory=@DEPLOY_DIR@
+Environment=BACKUP_PROJECT_ROOT=@DEPLOY_DIR@
+Environment=OFFSITE_BACKUP_LOCK=@DEPLOY_DIR@/.offsite-backup.lock
+EnvironmentFile=/etc/dapex-game-backup.env
+ExecStart=/usr/local/sbin/dapex-restic-backup backup
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=45min
+

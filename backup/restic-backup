@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=${BACKUP_PROJECT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}
+restic_bin=${RESTIC_BIN:-restic}
+offsite_lock=${OFFSITE_BACKUP_LOCK:-$root/.offsite-backup.lock}
+valheim_backup=${VALHEIM_BACKUP_COMMAND:-$root/scripts/backup.sh}
+minecraft_backup=${MINECRAFT_BACKUP_COMMAND:-$root/scripts/backup-minecraft.sh}
+
+die() { printf 'offsite-backup: %s\n' "$*" >&2; exit 1; }
+need_config() {
+  [[ -n ${RESTIC_REPOSITORY:-} ]] || die 'RESTIC_REPOSITORY is not set'
+  if [[ -n ${RESTIC_PASSWORD_FILE:-} ]]; then
+    [[ -r $RESTIC_PASSWORD_FILE ]] || die "password file is not readable: $RESTIC_PASSWORD_FILE"
+  elif [[ -z ${RESTIC_PASSWORD:-} ]]; then
+    die 'set RESTIC_PASSWORD_FILE (recommended) or RESTIC_PASSWORD'
+  fi
+  command -v "$restic_bin" >/dev/null 2>&1 || die "restic executable not found: $restic_bin"
+}
+run_restic() { "$restic_bin" "$@"; }
+
+command=${1:-backup}
+case "$command" in
+  init)
+    need_config
+    run_restic init
+    ;;
+  backup)
+    need_config
+    command -v flock >/dev/null 2>&1 || die 'flock is required'
+    mkdir -p "$(dirname "$offsite_lock")"
+    exec 9>"$offsite_lock"
+    flock -n 9 || die 'another off-host backup is already running'
+
+    created=()
+    upload_succeeded=false
+    cleanup() {
+      if [[ $upload_succeeded == true && ${KEEP_LOCAL_ARCHIVES:-false} != true ]]; then
+        for archive in "${created[@]:-}"; do
+          [[ -n $archive && -f $archive ]] && rm -f -- "$archive"
+        done
+      fi
+    }
+    trap cleanup EXIT INT TERM
+
+    cd "$root"
+    valheim_archive=$("$valheim_backup")
+    [[ -f $valheim_archive ]] || die "Valheim backup did not create: $valheim_archive"
+    created+=("$valheim_archive")
+
+    minecraft_archive=$("$minecraft_backup")
+    [[ -f $minecraft_archive ]] || die "Minecraft backup did not create: $minecraft_archive"
+    created+=("$minecraft_archive")
+
+    run_restic backup \
+      --tag dapex-game-server \
+      --tag consistent-game-archives \
+      --host "${RESTIC_HOST:-$(hostname -s)}" \
+      -- "$valheim_archive" "$minecraft_archive"
+    upload_succeeded=true
+    ;;
+  forget)
+    need_config
+    run_restic forget --prune \
+      --tag dapex-game-server \
+      --keep-daily "${RESTIC_KEEP_DAILY:-7}" \
+      --keep-weekly "${RESTIC_KEEP_WEEKLY:-5}" \
+      --keep-monthly "${RESTIC_KEEP_MONTHLY:-12}" \
+      --keep-yearly "${RESTIC_KEEP_YEARLY:-2}"
+    ;;
+  check)
+    need_config
+    run_restic check --read-data-subset="${RESTIC_CHECK_SUBSET:-5%}"
+    ;;
+  snapshots)
+    need_config
+    run_restic snapshots --tag dapex-game-server
+    ;;
+  *)
+    die 'usage: restic-backup {init|backup|forget|check|snapshots}'
+    ;;
+esac

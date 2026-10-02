@@ -49,6 +49,37 @@ export function statusEmbed(status) {
   return embed;
 }
 
+export function gameStatusEmbed(status) {
+  if (status.game === 'valheim') return statusEmbed(status);
+  const view = display(status.state);
+  const title = status.game === 'minecraft' ? 'Minecraft · Dapex Fabric' : 'Shared game server';
+  const embed = new EmbedBuilder()
+    .setTitle(`${view.icon} ${title} — ${view.label}`)
+    .setColor(view.color)
+    .addFields(
+      { name: 'Active game', value: status.game === 'none' ? 'None' : 'Minecraft', inline: true },
+      { name: 'Players', value: status.playerCount == null ? '—' : `${status.playerCount}${status.maxPlayers ? ` / ${status.maxPlayers}` : ''}`, inline: true },
+      { name: 'Release', value: status.releaseName || '—', inline: true },
+      { name: 'Memory', value: status.memory || '—', inline: true },
+      { name: 'CPU', value: status.cpu || '—', inline: true },
+      { name: 'Address', value: status.address ? `\`${status.address}\`` : '—', inline: true },
+    )
+    .setTimestamp(status.checkedAt || new Date());
+  if (status.portalUrl) embed.addFields({ name: 'Client pack', value: `[Download and setup instructions](${status.portalUrl})` });
+  if (status.reason) embed.addFields({ name: 'Health detail', value: status.reason.slice(0, 1024) });
+  return embed;
+}
+
+export function gameTransitionEmbed(previous, current) {
+  const view = display(current);
+  const game = current.game === 'none' ? 'Shared game server' : current.game === 'minecraft' ? 'Minecraft' : 'Valheim';
+  return new EmbedBuilder()
+    .setTitle(`${view.icon} ${game} is ${view.label.toLowerCase()}`)
+    .setColor(view.color)
+    .setDescription(`State changed from **${display(previous).label}** to **${view.label}**.`)
+    .setTimestamp(current.checkedAt || new Date());
+}
+
 export function transitionEmbed(previous, current) {
   const view = display(current);
   return new EmbedBuilder()

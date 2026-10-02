@@ -62,13 +62,14 @@ outage and restart Valheim behind it.
 The included Discord bot keeps operations in the same place players already
 coordinate:
 
-- a persistent Valheim status card;
-- transition and high-memory alerts;
+- a persistent status card for whichever game owns the slot;
+- transition, unhealthy-server, and high-memory alerts;
 - current Valheim player count and PlayFab join code;
 - `/valheim status`, `/valheim join`, and `/valheim players`;
 - admin-only `/valheim restart` and `/valheim backup`;
 - `/game status` for the shared game slot;
 - admin-only `/game switch` for Valheim, Minecraft, or offline.
+- `/minecraft status` plus admin-only whitelist add, remove, and list commands.
 
 Discord never receives direct Docker access from a command. Game switching goes
 through the bounded localhost control API, uses the same exclusive lock as the
@@ -98,6 +99,7 @@ and is not a supported deployment target.
 | `discord/` | Discord status, alerts, backups, and game-switch commands |
 | `minecraft/` | Minecraft environment template, pinned image, world and generated-profile mounts |
 | `monitoring/` | Valheim process/PlayFab watchdog and bounded recovery policy |
+| `backup/` | Provider-neutral encrypted off-host backups with restic and systemd timers |
 | `scripts/` | Container entrypoints, startup scripts, and consistent backups |
 
 Detailed documentation:
@@ -106,6 +108,7 @@ Detailed documentation:
 - [Minecraft profiles and player onboarding](minecraft/README.md)
 - [Valheim watchdog](monitoring/README.md)
 - [Discord operations](discord/README.md)
+- [Off-host backup and restore](backup/README.md)
 
 ## Resource model
 

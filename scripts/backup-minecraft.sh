@@ -14,6 +14,7 @@ if [[ "$running" == true ]]; then docker stop -t 120 minecraft >/dev/null; fi
 
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 archive="backups/minecraft/dapex-fabric-$timestamp.tar.gz"
-tar -czf "$archive" minecraft/data minecraft/generated
+sudo tar -czf "$archive" minecraft/data minecraft/generated
+sudo chown "$(id -u):$(id -g)" "$archive"
 tar -tzf "$archive" >/dev/null
 echo "$archive"

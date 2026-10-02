@@ -10,15 +10,17 @@ import {
   SlashCommandBuilder,
 } from 'discord.js';
 import { loadConfig } from './config.js';
-import { memoryWarningEmbed, statusEmbed, statusText, transitionEmbed } from './render.js';
+import { gameStatusEmbed, gameTransitionEmbed, memoryWarningEmbed, statusEmbed, statusText } from './render.js';
 import { loadState, saveState } from './state.js';
 import { createValheim, parseMemoryUsageGiB } from './valheim.js';
 import { evaluateMemoryPolicy } from './memory-policy.js';
 import { createGameControl } from './game-control.js';
+import { createMinecraft } from './minecraft.js';
 
 const config = loadConfig();
 const valheim = createValheim(config);
 const gameControl = createGameControl(config);
+const minecraft = createMinecraft(config);
 const client = new Client({ intents: [GatewayIntentBits.Guilds], allowedMentions: { parse: [] } });
 const cooldowns = new Map();
 let pollInFlight = false;
@@ -40,6 +42,13 @@ const commands = [
           { name: 'Minecraft', value: 'minecraft' },
           { name: 'Offline', value: 'none' },
         ))),
+  new SlashCommandBuilder().setName('minecraft').setDescription('Minecraft server information and operations')
+    .addSubcommand((c) => c.setName('status').setDescription('Show Minecraft health, players, and active pack'))
+    .addSubcommand((c) => c.setName('whitelist-add').setDescription('Add a Java username to the whitelist (admin only)')
+      .addStringOption((option) => option.setName('username').setDescription('Minecraft Java username').setRequired(true)))
+    .addSubcommand((c) => c.setName('whitelist-remove').setDescription('Remove a Java username from the whitelist (admin only)')
+      .addStringOption((option) => option.setName('username').setDescription('Minecraft Java username').setRequired(true)))
+    .addSubcommand((c) => c.setName('whitelist-list').setDescription('List whitelisted players (admin only)')),
 ].map((command) => command.toJSON());
 
 function hasAdminRole(interaction) {
@@ -70,15 +79,18 @@ async function updatePersistentStatus(status) {
   if (state.statusMessageId) {
     message = await channel.messages.fetch(state.statusMessageId).catch(() => null);
   }
-  if (message) await message.edit({ embeds: [statusEmbed(status)] });
-  else message = await channel.send({ embeds: [statusEmbed(status)] });
+  if (message) await message.edit({ embeds: [gameStatusEmbed(status)] });
+  else message = await channel.send({ embeds: [gameStatusEmbed(status)] });
 
-  if (state.lastStatus && state.lastStatus !== status.state) {
+  const statusKey = `${status.game || 'valheim'}:${status.state}`;
+  if (state.lastStatusKey && state.lastStatusKey !== statusKey) {
     const alertChannel = await fetchTextChannel(config.alertChannelId);
-    await alertChannel.send({ embeds: [transitionEmbed({ state: state.lastStatus }, status)] });
+    await alertChannel.send({ embeds: [gameTransitionEmbed({ state: state.lastStatus }, status)] });
   }
-  const usedGiB = parseMemoryUsageGiB(status.memory);
-  const memoryPolicy = evaluateMemoryPolicy(state, usedGiB, config);
+  const usedGiB = status.game === 'valheim' ? parseMemoryUsageGiB(status.memory) : null;
+  const memoryPolicy = status.game === 'valheim'
+    ? evaluateMemoryPolicy(state, usedGiB, config)
+    : { warn: false, restart: false, highMemoryAlerted: false, highMemorySamples: 0, memoryRestartPending: false };
   if (memoryPolicy.warn) {
     const alertChannel = await fetchTextChannel(config.alertChannelId);
     const mention = alertRoleId ? `<@&${alertRoleId}>` : `@${config.alertRoleName}`;
@@ -99,6 +111,7 @@ async function updatePersistentStatus(status) {
   await saveState(config.stateFile, {
     statusMessageId: message.id,
     lastStatus: status.state,
+    lastStatusKey: statusKey,
     containerStartedAt: status.startedAt,
     joinCode: status.joinCode || (state.containerStartedAt === status.startedAt ? state.joinCode : null),
     highMemoryAlerted: memoryPolicy.highMemoryAlerted,
@@ -126,7 +139,29 @@ async function updatePersistentStatus(status) {
 }
 
 async function getStatus() {
+  let controller;
+  try { controller = await gameControl.status(); }
+  catch { controller = null; }
+  const active = controller?.status?.active;
+  if (active === 'minecraft') {
+    const container = controller.status.containers?.minecraft || {};
+    const players = await minecraft.players();
+    return {
+      game: 'minecraft',
+      state: container.running && (!container.health || container.health === 'healthy') ? 'online' : container.running ? 'starting' : 'degraded',
+      reason: container.health === 'unhealthy' ? 'Minecraft container reported unhealthy' : null,
+      ...players,
+      memory: controller.status.stats?.memory || null,
+      cpu: controller.status.stats?.cpu || null,
+      releaseName: controller.active?.releaseName || (controller.active?.release ? `${controller.active.name} v${controller.active.release}` : null),
+      address: config.minecraftAddress,
+      portalUrl: config.playerPortalUrl,
+      checkedAt: new Date(),
+    };
+  }
+  if (active === 'none') return { game: 'none', state: 'down', playerCount: 0, players: [], memory: null, cpu: null, checkedAt: new Date() };
   const status = await valheim.getStatus();
+  status.game = 'valheim';
   if (!status.joinCode && status.state === 'online' && !status.watchdogFresh) {
     const state = await loadState(config.stateFile);
     if (state.containerStartedAt === status.startedAt) status.joinCode = state.joinCode || null;
@@ -190,6 +225,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const result = await gameControl.switchGame(target);
       await interaction.editReply(`Game slot switched successfully. Active: **${result.active}**.`);
+    } catch (error) {
+      console.error(`/${interaction.commandName} ${subcommand} failed:`, error);
+      const content = `The operation failed: ${error.message}`;
+      if (interaction.deferred || interaction.replied) await interaction.editReply(content).catch(() => {});
+      else await interaction.reply({ content, flags: MessageFlags.Ephemeral }).catch(() => {});
+    }
+    return;
+  }
+  if (interaction.commandName === 'minecraft') {
+    const subcommand = interaction.options.getSubcommand();
+    try {
+      if (subcommand === 'status') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        await interaction.editReply({ embeds: [gameStatusEmbed(await getStatus())] });
+        return;
+      }
+      if (!hasAdminRole(interaction)) {
+        await interaction.reply({ content: 'This command requires the configured game admin role.', flags: MessageFlags.Ephemeral });
+        return;
+      }
+      const remaining = claimCooldown(`minecraft-${subcommand}`);
+      if (remaining) {
+        await interaction.reply({ content: `That command is cooling down. Try again in ${remaining}s.`, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const action = subcommand.replace('whitelist-', '');
+      const username = action === 'list' ? null : interaction.options.getString('username', true);
+      const result = await gameControl.minecraftWhitelist(action, username);
+      const message = result.message || (Array.isArray(result.players) ? result.players.join(', ') || 'Whitelist is empty.' : 'Whitelist updated.');
+      await interaction.editReply(`\`${message}\``);
     } catch (error) {
       console.error(`/${interaction.commandName} ${subcommand} failed:`, error);
       const content = `The operation failed: ${error.message}`;

@@ -44,3 +44,9 @@ export async function containerLogs(name, since = null) {
   args.push(name);
   return runOptional('docker', args, { allowedExitCodes: [1], timeout: 30_000, maxBuffer: 8 * 1024 * 1024 });
 }
+
+export async function minecraftWhitelist(container, action = 'list', username = null) {
+  const args = ['exec', container, 'rcon-cli', 'whitelist', action];
+  if (username) args.push(username);
+  return run('docker', args, { timeout: 30_000 });
+}

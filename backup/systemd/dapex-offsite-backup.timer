@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily Dapex game server off-host backup
+
+[Timer]
+OnCalendar=*-*-* 04:15:00 Asia/Jakarta
+RandomizedDelaySec=20m
+Persistent=true
+Unit=dapex-offsite-backup.service
+
+[Install]
+WantedBy=timers.target
+

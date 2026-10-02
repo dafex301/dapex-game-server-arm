@@ -72,6 +72,17 @@
         <button id="publish-button" class="accent">PUBLISH RELEASE</button>
       </div>
     </section>
+
+    <section class="panel whitelist-panel">
+      <div class="panel-title"><span>04</span><h2>Minecraft whitelist</h2></div>
+      <div class="whitelist-controls">
+        <div>
+          <label for="whitelist-name">Java username</label>
+          <div class="search-row"><input id="whitelist-name" placeholder="PlayerName" maxlength="16"><button id="whitelist-add" class="accent">ALLOW PLAYER</button></div>
+        </div>
+        <div><p class="eyebrow">CURRENT ACCESS</p><pre id="whitelist-output">Start Minecraft to manage the whitelist.</pre></div>
+      </div>
+    </section>
   </main>
 
   <div id="toast" class="toast" role="status"></div>

@@ -2,7 +2,7 @@
 
 This bot runs on the same host as Docker and provides:
 
-- a single persistent status card, edited every poll;
+- a single persistent status card for whichever exclusive game is active, edited every poll;
 - transition-only alerts when state changes among online, starting, restarting,
   maintenance, degraded, offline, and unknown;
 - one-shot high-memory warnings in the alert channel, mentioning the configured
@@ -11,6 +11,7 @@ This bot runs on the same host as Docker and provides:
 - role-restricted `/valheim restart` and `/valheim backup` with cooldowns;
 - `/game status` and role-restricted `/game switch` for the shared exclusive
   Valheim/Minecraft slot;
+- `/minecraft status` plus role-restricted whitelist add/remove/list commands;
 - guild-scoped slash-command registration on startup.
 
 `/valheim join` intentionally never exposes the server password. It only shows the
@@ -73,6 +74,13 @@ sudo systemctl daemon-reload
 ```
 
 The bot directory and `.env` remain in place unless deliberately removed.
+
+When Minecraft owns the slot, the persistent card shows container readiness,
+RCON player count, CPU/memory usage, the active Dapex Fabric release, public
+address, and player-portal link. A transition to an unhealthy or stopped
+Minecraft container is posted in the alert channel. Whitelist commands call the
+controller's bounded whitelist API; Discord never receives general Docker or
+RCON command execution. Player input is restricted to valid Minecraft Java usernames.
 
 The service restarts after failures and on boot. Host-level outage alerts still
 require an external heartbeat monitor: a bot running on this host cannot notify

@@ -40,6 +40,8 @@ function render() {
       <div><strong>${escapeHtml(mod.name)}</strong><small>${escapeHtml(mod.version || 'unresolved')} · ${escapeHtml(sideLabel(mod.side))}</small></div>
       <button data-remove="${encodeURIComponent(modKey(mod))}" aria-label="Remove ${escapeHtml(mod.name)}">REMOVE</button>
     </article>`).join('') : '<div class="empty-manifest">No mods staged yet. Fabric itself will still boot.</div>';
+  if (status.active === 'minecraft') refreshWhitelist();
+  else $('#whitelist-output').textContent = 'Start Minecraft to manage the whitelist.';
 }
 
 function escapeHtml(value) {
@@ -127,6 +129,20 @@ $('#publish-button').addEventListener('click', async () => {
   if (!confirm('Publish this draft as a new immutable Dapex Fabric release?')) return;
   try { const profile = await api('/api/admin/publish', { method: 'POST', body: '{}' }); await refresh(); toast(`${profile.releaseName} published`); }
   catch (error) { toast(error.message, true); }
+});
+
+async function refreshWhitelist() {
+  try { const result = await api('/api/admin/minecraft/whitelist'); $('#whitelist-output').textContent = result.message || result.players?.join(', ') || 'Whitelist is empty.'; }
+  catch (error) { $('#whitelist-output').textContent = error.message; }
+}
+
+$('#whitelist-add').addEventListener('click', async () => {
+  const username = $('#whitelist-name').value.trim();
+  if (!/^[A-Za-z0-9_]{3,16}$/.test(username)) return toast('Use a valid Minecraft Java username', true);
+  try {
+    const result = await api('/api/admin/minecraft/whitelist', { method: 'POST', body: JSON.stringify({ username }) });
+    $('#whitelist-name').value = ''; await refreshWhitelist(); toast(result.message || `${username} allowed`);
+  } catch (error) { toast(error.message, true); }
 });
 
 refresh().catch((error) => toast(error.message, true));

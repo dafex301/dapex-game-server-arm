@@ -27,6 +27,17 @@ export function createGameControl(config, fetchImpl = fetch, sleep = (millisecon
 
   return {
     status: () => request('/api/admin/status'),
+    publicStatus: () => request('/api/public'),
+    minecraftWhitelist: (action, username = null) => {
+      if (!['add', 'remove', 'list'].includes(action)) throw new Error('Unsupported whitelist action');
+      if (action !== 'list' && !/^[A-Za-z0-9_]{3,16}$/.test(username)) {
+        throw new Error('Minecraft username must contain 3–16 letters, numbers, or underscores.');
+      }
+      const options = action === 'list'
+        ? {}
+        : { method: action === 'add' ? 'POST' : 'DELETE', body: JSON.stringify({ username }) };
+      return request('/api/admin/minecraft/whitelist', options);
+    },
     switchGame: async (target) => {
       const operation = await request('/api/admin/switch', { method: 'POST', body: JSON.stringify({ target }) });
       return waitForOperation(operation.id);

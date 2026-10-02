@@ -10,6 +10,7 @@ import { searchCurseForge, searchModrinth } from './catalog.js';
 import { loadConfig } from './config.js';
 import { createOrchestrator } from './orchestrator.js';
 import { createProfiles } from './profiles.js';
+import { minecraftWhitelist } from './docker.js';
 
 const config = loadConfig();
 const orchestrator = createOrchestrator(config);
@@ -31,6 +32,16 @@ const querySchema = z.object({ query: z.string().trim().min(2).max(100), source:
 const addSchema = z.object({ source: z.literal('modrinth'), projectId: z.string().min(1).max(100), slug: z.string().max(100).nullable().optional(), name: z.string().min(1).max(200) });
 const versionSchema = z.object({ version: z.string().regex(/^\d+\.\d+(?:\.\d+)?$/) });
 const switchSchema = z.object({ target: z.enum(['valheim', 'minecraft', 'none']) });
+const whitelistSchema = z.object({ username: z.string().regex(/^[A-Za-z0-9_]{3,16}$/) });
+
+async function requireMinecraftReady() {
+  const status = await orchestrator.status();
+  if (status.active !== 'minecraft' || !status.containers.minecraft.running) {
+    const error = new Error('Minecraft must be active before managing its whitelist');
+    error.status = 409;
+    throw error;
+  }
+}
 
 app.get('/', (request, response) => {
   const playerHost = new URL(config.playerBaseUrl).hostname;
@@ -105,6 +116,24 @@ app.post('/api/admin/publish', asyncRoute(async (request, response) => {
   if (status.active === 'minecraft') throw new Error('Stop or switch away from Minecraft before publishing a profile');
   response.status(201).json(await profiles.publish(request.actor));
 }));
+app.get('/api/admin/minecraft/whitelist', asyncRoute(async (_request, response) => {
+  await requireMinecraftReady();
+  const output = await minecraftWhitelist(config.minecraftContainer);
+  const names = output.match(/:\s*(.*)$/)?.[1]?.split(',').map((name) => name.trim()).filter(Boolean) || [];
+  response.json({ players: names, message: output });
+}));
+app.post('/api/admin/minecraft/whitelist', asyncRoute(async (request, response) => {
+  const { username } = whitelistSchema.parse(request.body);
+  await requireMinecraftReady();
+  const message = await minecraftWhitelist(config.minecraftContainer, 'add', username);
+  response.status(201).json({ message });
+}));
+app.delete('/api/admin/minecraft/whitelist', asyncRoute(async (request, response) => {
+  const { username } = whitelistSchema.parse(request.body);
+  await requireMinecraftReady();
+  const message = await minecraftWhitelist(config.minecraftContainer, 'remove', username);
+  response.json({ message });
+}));
 
 app.use((error, request, response, _next) => {
   console.error(`${request.method} ${request.path}:`, error);
@@ -116,7 +145,7 @@ app.use((error, request, response, _next) => {
     response.status(413).json({ error: `Upload exceeds ${config.maxUploadBytes / 1024 / 1024} MiB` });
     return;
   }
-  response.status(500).json({ error: error.message || 'Unexpected control service error' });
+  response.status(error.status || 500).json({ error: error.message || 'Unexpected control service error' });
 });
 
 const server = app.listen(config.port, config.host, () => {

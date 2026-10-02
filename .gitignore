@@ -3,6 +3,7 @@ server/
 persistentdata/
 backups/
 .maintenance.lock
+.offsite-backup.lock
 control/.env
 control/node_modules/
 runtime/

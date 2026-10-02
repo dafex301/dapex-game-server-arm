@@ -50,6 +50,11 @@ main { max-width: 1440px; margin: auto; padding: 28px 38px 80px; }
 .good { color: var(--acid); }.bad, .error { color: var(--red); }
 
 .workshop { margin-top: 18px; }
+.whitelist-panel { margin-top: 18px; }
+.whitelist-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; padding: 24px; }
+.whitelist-controls label { display: block; margin-bottom: 10px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
+.whitelist-controls .search-row { grid-template-columns: 1fr auto; }
+.whitelist-controls pre { min-height: 47px; margin: 0; padding: 14px; overflow: auto; color: var(--paper); background: #0f100d; border: 1px solid var(--line); font: 11px/1.5 "Azeret Mono", monospace; white-space: pre-wrap; }
 .workshop-grid { display: grid; grid-template-columns: 1.4fr .6fr; min-height: 310px; }
 .catalog { padding: 24px; border-right: 1px solid var(--line); }
 .catalog label, .manifest-head label { display: block; margin-bottom: 10px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
@@ -92,7 +97,7 @@ button.accent { color: var(--ink); background: var(--acid); border-color: var(--
 
 @media (max-width: 860px) {
   .masthead, main { padding-left: 18px; padding-right: 18px; }
-  .hero-grid, .workshop-grid, .connect-card, .steps { grid-template-columns: 1fr; }
+  .hero-grid, .workshop-grid, .whitelist-controls, .connect-card, .steps { grid-template-columns: 1fr; }
   .telemetry-panel { margin-top: 0; }.catalog { border-right: 0; border-bottom: 1px solid var(--line); }.switch-track { grid-template-columns: 1fr; }.switch-track button { min-height: 78px; }
   .search-row { grid-template-columns: 1fr; gap: 8px; }.manifest-head { align-items: start; gap: 18px; flex-direction: column; }.mod-list article { grid-template-columns: 75px 1fr; }.mod-list article button { grid-column: 2; justify-self: start; }
   .connect-card div, .steps article, .steps article + article { border-right: 0; border-bottom: 1px solid #898575; padding: 20px 0; }.download-row { align-items: stretch; flex-direction: column; }

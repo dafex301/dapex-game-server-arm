@@ -1,0 +1,14 @@
+[Unit]
+Description=Initialize the Dapex restic repository
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@SERVICE_USER@
+Group=@SERVICE_USER@
+WorkingDirectory=@DEPLOY_DIR@
+Environment=BACKUP_PROJECT_ROOT=@DEPLOY_DIR@
+EnvironmentFile=/etc/dapex-game-backup.env
+ExecStart=/usr/local/sbin/dapex-restic-backup init
+

@@ -1,0 +1,12 @@
+[Unit]
+Description=Weekly Dapex restic retention and integrity check
+
+[Timer]
+OnCalendar=Sun *-*-* 05:15:00 Asia/Jakarta
+RandomizedDelaySec=30m
+Persistent=true
+Unit=dapex-offsite-backup-maintenance.service
+
+[Install]
+WantedBy=timers.target
+

@@ -45,5 +45,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - run: bash -n scripts/*.sh monitoring/valheim-watchdog monitoring/install.sh monitoring/tests/run.sh control/install.sh
+      - run: bash -n scripts/*.sh monitoring/valheim-watchdog monitoring/install.sh monitoring/tests/run.sh control/install.sh backup/restic-backup backup/install.sh backup/tests/run.sh
       - run: ./monitoring/tests/run.sh
+      - run: ./backup/tests/run.sh
