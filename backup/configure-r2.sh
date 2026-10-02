@@ -7,6 +7,8 @@ account_id=${CLOUDFLARE_ACCOUNT_ID:-cfdcd7f5481ea4de4734e670e1c9b75a}
 bucket=${R2_BACKUP_BUCKET:-dapex-game-server-backups}
 env_file=/etc/dapex-game-backup.env
 password_file=/etc/dapex-game-backup.password
+service_group=${BACKUP_SERVICE_GROUP:-ubuntu}
+getent group "$service_group" >/dev/null || { echo "Unknown backup service group: $service_group" >&2; exit 1; }
 
 read -rp 'R2 Access Key ID: ' access_key
 read -rsp 'R2 Secret Access Key: ' secret_key
@@ -28,15 +30,15 @@ RESTIC_KEEP_MONTHLY=12
 RESTIC_KEEP_YEARLY=2
 KEEP_LOCAL_ARCHIVES=false
 EOF
-chown root:root "$temporary"
-chmod 0600 "$temporary"
+chown root:"$service_group" "$temporary"
+chmod 0640 "$temporary"
 mv "$temporary" "$env_file"
 
 if [[ ! -s $password_file ]]; then
   openssl rand -base64 48 >"$password_file"
 fi
-chown root:root "$password_file"
-chmod 0600 "$password_file"
+chown root:"$service_group" "$password_file"
+chmod 0640 "$password_file"
 unset access_key secret_key
 echo "R2 backup configuration stored for bucket ${bucket}."
 echo 'The repository password remains only on this host; save a separate recovery copy before relying on the backup.'

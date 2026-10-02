@@ -29,7 +29,8 @@ sudo systemctl enable --now dapex-offsite-backup.timer dapex-offsite-backup-main
 
 Create provider credentials with access to only the backup bucket/prefix. Do
 not reuse a Cloudflare global API key. Keep the env and password files owned by
-root with mode `0600`. The repository password is required for restoration;
+root, readable only by the dedicated backup service group, and not world-readable.
+The repository password is required for restoration;
 store a separate copy in a password manager.
 
 For Cloudflare R2, create a private bucket and an R2 API token restricted to
