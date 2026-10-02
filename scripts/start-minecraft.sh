@@ -8,6 +8,7 @@ image_file=${MINECRAFT_IMAGE_FILE:-minecraft/image.txt}
 [[ -f "$image_file" ]] || { echo "Missing pinned Minecraft image file: $image_file" >&2; exit 1; }
 
 mkdir -p minecraft/data minecraft/generated/server-mods
+chmod -R a+rX minecraft/generated/server-mods
 if [[ -d minecraft/generated/server-overrides ]]; then
   cp -a minecraft/generated/server-overrides/. minecraft/data/
 fi
