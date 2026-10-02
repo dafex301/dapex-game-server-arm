@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dapex Server Room</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+  <header class="masthead">
+    <div>
+      <p class="eyebrow">DAPEX // GAME INFRASTRUCTURE</p>
+      <h1>Server room</h1>
+    </div>
+    <div class="live-chip"><span></span><strong id="active-game">Loading</strong></div>
+  </header>
+
+  <main>
+    <section class="hero-grid">
+      <article class="panel slot-panel">
+        <div class="panel-title"><span>01</span><h2>Active game slot</h2></div>
+        <div class="switch-track" id="game-switch">
+          <button data-game="valheim"><small>NORSE</small>VALHEIM</button>
+          <button data-game="none"><small>QUIET</small>OFFLINE</button>
+          <button data-game="minecraft"><small>FABRIC 1.21.1</small>MINECRAFT</button>
+        </div>
+        <p class="hint" id="slot-hint">Only one game may own the machine at a time.</p>
+      </article>
+
+      <article class="panel telemetry-panel">
+        <div class="panel-title"><span>02</span><h2>Telemetry</h2></div>
+        <dl class="telemetry">
+          <div><dt>CPU</dt><dd id="cpu">—</dd></div>
+          <div><dt>MEMORY</dt><dd id="memory">—</dd></div>
+          <div><dt>DESIRED</dt><dd id="desired">—</dd></div>
+          <div><dt>INTERLOCK</dt><dd id="interlock">—</dd></div>
+        </dl>
+      </article>
+    </section>
+
+    <section class="panel workshop">
+      <div class="panel-title"><span>03</span><h2>Dapex Fabric workshop</h2><b id="release-badge">v0 draft</b></div>
+      <div class="workshop-grid">
+        <div class="catalog">
+          <label for="mod-search">Find a compatible mod</label>
+          <div class="search-row">
+            <select id="source"><option value="modrinth">Modrinth</option><option value="curseforge">CurseForge</option></select>
+            <input id="mod-search" placeholder="Lithium, Fabric API, Terralith…" minlength="2">
+            <button id="search-button" class="accent">SEARCH</button>
+          </div>
+          <div id="search-results" class="search-results empty">Search results appear here.</div>
+        </div>
+
+        <div class="drop-zone" id="drop-zone">
+          <input id="file-upload" type="file" accept=".jar,.mrpack,.zip" hidden>
+          <div class="drop-mark">↓</div>
+          <strong>Drop a mod or pack</strong>
+          <p>Fabric JAR · Modrinth MRPACK · CurseForge ZIP</p>
+          <button id="browse-button">CHOOSE FILE</button>
+        </div>
+      </div>
+
+      <div class="manifest-head">
+        <div><p class="eyebrow">STAGED MANIFEST</p><h3 id="profile-name">Dapex Fabric</h3></div>
+        <label>Minecraft <input id="minecraft-version" value="1.21.1"></label>
+      </div>
+      <div id="compatibility" class="compatibility"></div>
+      <div id="mod-list" class="mod-list"></div>
+      <div class="publish-bar">
+        <p>Publishing writes a reproducible release and materializes the server profile. Minecraft must be stopped.</p>
+        <button id="publish-button" class="accent">PUBLISH RELEASE</button>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status"></div>
+  <script type="module" src="/admin.js"></script>
+</body>
+</html>

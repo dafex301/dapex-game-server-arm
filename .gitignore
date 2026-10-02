@@ -3,5 +3,13 @@ server/
 persistentdata/
 backups/
 .maintenance.lock
+control/.env
+control/node_modules/
+runtime/
+minecraft/.env
+minecraft/generated/*
+!minecraft/generated/.gitignore
+minecraft/data/*
+!minecraft/data/.gitignore
 *.zip
 .DS_Store

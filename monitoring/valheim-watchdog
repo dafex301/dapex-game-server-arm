@@ -37,6 +37,7 @@ SERVER_DIR=${SERVER_DIR:-/home/ubuntu/valheim-server-arm}
 STATE_FILE=${STATE_FILE_OVERRIDE:-${STATE_FILE:-/var/lib/valheim-watchdog/state.json}}
 LOCK_FILE=${LOCK_FILE:-/var/lib/valheim-watchdog/watchdog.lock}
 MAINTENANCE_LOCK_FILE=${MAINTENANCE_LOCK_FILE:-${SERVER_DIR}/.maintenance.lock}
+GAME_SLOT_STATE_FILE=${GAME_SLOT_STATE_FILE:-/var/lib/dapex-game-control/game-slot.json}
 HOST_HEARTBEAT_URL=${HOST_HEARTBEAT_URL:-}
 HEARTBEAT_TIMEOUT_SECONDS=${HEARTBEAT_TIMEOUT_SECONDS:-10}
 STARTUP_GRACE_SECONDS=${STARTUP_GRACE_SECONDS:-900}
@@ -191,6 +192,27 @@ PY
     fi
   fi
 }
+
+# The shared game-slot controller is authoritative. A healthy Minecraft slot is
+# not a Valheim outage, so the watchdog must never resurrect Valheim behind it.
+if [[ -f "$GAME_SLOT_STATE_FILE" ]]; then
+  desired_game=$(python3 - "$GAME_SLOT_STATE_FILE" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        print(json.load(handle).get("desired", "valheim"))
+except (OSError, ValueError):
+    print("unknown")
+PY
+)
+  if [[ "$desired_game" != valheim ]]; then
+    status=inactive
+    reason="Valheim is intentionally inactive; desired game slot is $desired_game"
+    action=none
+    write_state
+    exit 0
+  fi
+fi
 
 schedule_recovery() {
   local recovery_kind=$1

@@ -10,15 +10,19 @@ import {
   SlashCommandBuilder,
 } from 'discord.js';
 import { loadConfig } from './config.js';
-import { statusEmbed, statusText, transitionEmbed } from './render.js';
+import { memoryWarningEmbed, statusEmbed, statusText, transitionEmbed } from './render.js';
 import { loadState, saveState } from './state.js';
-import { createValheim } from './valheim.js';
+import { createValheim, parseMemoryUsageGiB } from './valheim.js';
+import { evaluateMemoryPolicy } from './memory-policy.js';
+import { createGameControl } from './game-control.js';
 
 const config = loadConfig();
 const valheim = createValheim(config);
+const gameControl = createGameControl(config);
 const client = new Client({ intents: [GatewayIntentBits.Guilds], allowedMentions: { parse: [] } });
 const cooldowns = new Map();
 let pollInFlight = false;
+let alertRoleId = null;
 
 const commands = [
   new SlashCommandBuilder().setName('valheim').setDescription('Valheim server information and operations')
@@ -27,6 +31,15 @@ const commands = [
     .addSubcommand((c) => c.setName('players').setDescription('Show players detected in recent server logs'))
     .addSubcommand((c) => c.setName('restart').setDescription('Gracefully restart the server (admin only)'))
     .addSubcommand((c) => c.setName('backup').setDescription('Stop, back up, and resume the server (admin only)')),
+  new SlashCommandBuilder().setName('game').setDescription('Shared game server operations')
+    .addSubcommand((c) => c.setName('status').setDescription('Show the active game slot'))
+    .addSubcommand((c) => c.setName('switch').setDescription('Switch the exclusive game slot (admin only)')
+      .addStringOption((option) => option.setName('target').setDescription('Game to start').setRequired(true)
+        .addChoices(
+          { name: 'Valheim', value: 'valheim' },
+          { name: 'Minecraft', value: 'minecraft' },
+          { name: 'Offline', value: 'none' },
+        ))),
 ].map((command) => command.toJSON());
 
 function hasAdminRole(interaction) {
@@ -64,12 +77,52 @@ async function updatePersistentStatus(status) {
     const alertChannel = await fetchTextChannel(config.alertChannelId);
     await alertChannel.send({ embeds: [transitionEmbed({ state: state.lastStatus }, status)] });
   }
+  const usedGiB = parseMemoryUsageGiB(status.memory);
+  const memoryPolicy = evaluateMemoryPolicy(state, usedGiB, config);
+  if (memoryPolicy.warn) {
+    const alertChannel = await fetchTextChannel(config.alertChannelId);
+    const mention = alertRoleId ? `<@&${alertRoleId}>` : `@${config.alertRoleName}`;
+    await alertChannel.send({
+      content: `${mention} Valheim memory is close to the crash range.`,
+      embeds: [memoryWarningEmbed(status, usedGiB, config.memoryAlertGiB)],
+      allowedMentions: alertRoleId ? { roles: [alertRoleId] } : { parse: [] },
+    });
+  }
+  if (memoryPolicy.restart) {
+    const alertChannel = await fetchTextChannel(config.alertChannelId);
+    const mention = alertRoleId ? `<@&${alertRoleId}>` : `@${config.alertRoleName}`;
+    await alertChannel.send({
+      content: `${mention} Valheim stayed above ${config.memoryRestartGiB} GiB for ${config.memoryRestartSamples} checks. A graceful save and restart will begin in ${config.memoryRestartCountdownMs / 1000} seconds.`,
+      allowedMentions: alertRoleId ? { roles: [alertRoleId] } : { parse: [] },
+    });
+  }
   await saveState(config.stateFile, {
     statusMessageId: message.id,
     lastStatus: status.state,
     containerStartedAt: status.startedAt,
     joinCode: status.joinCode || (state.containerStartedAt === status.startedAt ? state.joinCode : null),
+    highMemoryAlerted: memoryPolicy.highMemoryAlerted,
+    highMemorySamples: memoryPolicy.highMemorySamples,
+    memoryRestartPending: memoryPolicy.memoryRestartPending,
   });
+  if (memoryPolicy.restart) {
+    setTimeout(async () => {
+      try {
+        await valheim.restart();
+        const current = await loadState(config.stateFile);
+        await saveState(config.stateFile, {
+          ...current,
+          highMemorySamples: 0,
+          memoryRestartPending: false,
+        });
+        await poll();
+      } catch (error) {
+        console.error('Automatic high-memory restart failed:', error);
+        const current = await loadState(config.stateFile);
+        await saveState(config.stateFile, { ...current, memoryRestartPending: false });
+      }
+    }, config.memoryRestartCountdownMs).unref();
+  }
 }
 
 async function getStatus() {
@@ -96,6 +149,10 @@ async function poll() {
 async function onReady(readyClient) {
   const rest = new REST({ version: '10' }).setToken(config.token);
   await rest.put(Routes.applicationGuildCommands(readyClient.user.id, config.guildId), { body: commands });
+  const guild = await readyClient.guilds.fetch(config.guildId);
+  const roles = await guild.roles.fetch();
+  alertRoleId = roles.find((role) => role.name.toLowerCase() === config.alertRoleName.toLowerCase())?.id || null;
+  if (!alertRoleId) console.warn(`Discord alert role @${config.alertRoleName} was not found; warnings will be sent without a real mention`);
   console.log(`Ready as ${readyClient.user.tag}; commands registered in guild ${config.guildId}`);
   await poll();
   setInterval(poll, config.pollMs).unref();
@@ -110,7 +167,38 @@ client.once(Events.ClientReady, (readyClient) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isChatInputCommand() || interaction.commandName !== 'valheim') return;
+  if (!interaction.isChatInputCommand()) return;
+  if (interaction.commandName === 'game') {
+    const subcommand = interaction.options.getSubcommand();
+    try {
+      if (subcommand === 'status') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const result = await gameControl.status();
+        await interaction.editReply(`Active: **${result.status.active}** · Desired: **${result.status.desired}** · Interlock: **${result.status.invariantOk ? 'armed' : 'FAULT'}**`);
+        return;
+      }
+      if (!hasAdminRole(interaction)) {
+        await interaction.reply({ content: 'This command requires the configured game admin role.', flags: MessageFlags.Ephemeral });
+        return;
+      }
+      const target = interaction.options.getString('target', true);
+      const remaining = claimCooldown('game-switch');
+      if (remaining) {
+        await interaction.reply({ content: `Game switching is cooling down. Try again in ${remaining}s.`, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const result = await gameControl.switchGame(target);
+      await interaction.editReply(`Game slot switched successfully. Active: **${result.active}**.`);
+    } catch (error) {
+      console.error(`/${interaction.commandName} ${subcommand} failed:`, error);
+      const content = `The operation failed: ${error.message}`;
+      if (interaction.deferred || interaction.replied) await interaction.editReply(content).catch(() => {});
+      else await interaction.reply({ content, flags: MessageFlags.Ephemeral }).catch(() => {});
+    }
+    return;
+  }
+  if (interaction.commandName !== 'valheim') return;
   const subcommand = interaction.options.getSubcommand();
   try {
     if (subcommand === 'restart' || subcommand === 'backup') {

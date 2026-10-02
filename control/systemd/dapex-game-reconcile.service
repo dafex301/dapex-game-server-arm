@@ -1,0 +1,16 @@
+[Unit]
+Description=Reconcile the exclusive Dapex game slot after boot
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=@SERVICE_USER@
+Group=docker
+WorkingDirectory=@DEPLOY_DIR@/control
+EnvironmentFile=@DEPLOY_DIR@/control/.env
+ExecStart=/usr/bin/flock -w 30 /var/lock/dapex-game-control.lock @NODE_BIN@ @DEPLOY_DIR@/control/src/reconcile-cli.js
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

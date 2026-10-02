@@ -42,6 +42,16 @@ export function parsePlayerCount(logs) {
   return Number.isInteger(value) ? value : null;
 }
 
+export function parseMemoryUsageGiB(value) {
+  const used = value?.split('/')[0]?.trim();
+  const match = used?.match(/^([0-9]+(?:\.[0-9]+)?)\s*([KMGT]i?B)$/i);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  const unit = match[2].toUpperCase();
+  const factors = { KB: 1 / 1024 / 1024, KIB: 1 / 1024 / 1024, MB: 1 / 1024, MIB: 1 / 1024, GB: 1, GIB: 1, TB: 1024, TIB: 1024 };
+  return amount * factors[unit];
+}
+
 export function classifyStatus(inspect, hasGameProcess, logs) {
   if (!inspect) return 'down';
   if (inspect.State?.Restarting) return 'restarting';
@@ -51,7 +61,7 @@ export function classifyStatus(inspect, hasGameProcess, logs) {
   return 'starting';
 }
 
-const watchdogStatuses = new Set(['online', 'starting', 'restarting', 'maintenance', 'down', 'unknown']);
+const watchdogStatuses = new Set(['online', 'starting', 'restarting', 'maintenance', 'inactive', 'down', 'unknown']);
 
 export function mergeWatchdogStatus(direct, watchdog, now = new Date(), maxAgeMs = 180_000) {
   if (!watchdog || watchdog.schema_version !== 1 || !watchdogStatuses.has(watchdog.status)) return direct;
@@ -62,8 +72,8 @@ export function mergeWatchdogStatus(direct, watchdog, now = new Date(), maxAgeMs
   const watchdogStart = watchdog.container?.started_at || null;
   const exactStart = Boolean(watchdogStart && direct.startedAt && watchdogStart === direct.startedAt);
   const sameStoppedState = !watchdogStart && watchdog.container?.running === false && direct.running === false;
-  const maintenance = watchdog.status === 'maintenance' && !watchdogStart;
-  if (!exactStart && !sameStoppedState && !maintenance) return direct;
+  const intentionalStop = ['maintenance', 'inactive'].includes(watchdog.status) && !watchdogStart;
+  if (!exactStart && !sameStoppedState && !intentionalStop) return direct;
 
   return {
     ...direct,

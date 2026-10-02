@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { statusEmbed, transitionEmbed } from '../src/render.js';
+import { memoryWarningEmbed, statusEmbed, transitionEmbed } from '../src/render.js';
 
 const base = {
   serverName: 'mbg enak',
@@ -38,4 +38,17 @@ test('unknown transition has an explicit presentation', () => {
   const data = transitionEmbed({ state: 'online' }, { ...base, state: 'unknown' }).toJSON();
   assert.match(data.title, /unknown/i);
   assert.match(data.description, /Online.*Unknown/);
+});
+
+test('inactive status explains that another game owns the host', () => {
+  const data = statusEmbed({ ...base, state: 'inactive', reason: 'desired game slot is minecraft' }).toJSON();
+  assert.match(data.title, /another game selected/i);
+  assert.ok(data.fields.some((field) => field.name === 'Health detail' && /minecraft/.test(field.value)));
+});
+
+test('memory warning shows usage and threshold', () => {
+  const data = memoryWarningEmbed({ ...base, state: 'online', playerCount: 4 }, 7.2, 7).toJSON();
+  assert.match(data.title, /memory warning/i);
+  assert.match(data.description, /7\.20 GiB/);
+  assert.ok(data.fields.some((field) => field.name === 'Players' && field.value === '4'));
 });

@@ -1,4 +1,22 @@
-# Valheim on wa-bot (ARM64)
+# Dapex game host on wa-bot (ARM64)
+
+One portable repository manages two dedicated games on the same small ARM host:
+
+- Valheim (`valheim`) with the existing world and Discord operations;
+- Minecraft Java Fabric (`minecraft`), initially pinned to 1.21.1;
+- a localhost-only control plane that enforces an exclusive game slot, manages
+  the Dapex Fabric profile, and serves admin/player web pages through Cloudflare.
+
+Only one game may run. The controller stops the current container, starts the
+selected one, verifies Docker readiness, and restores the previous game if the
+new target fails. Both containers use `restart=no`; a boot reconciler restores
+the desired slot rather than allowing Docker to start both independently.
+
+See [control/README.md](control/README.md) for installation, Cloudflare routing,
+security, and rollback. See [minecraft/README.md](minecraft/README.md) for the
+Fabric profile and player flow.
+
+## Valheim
 
 Vanilla world `kopdes`, server `mbg enak`, intended for up to six PC players.
 Runs the Windows dedicated server through Box64/Wine using
@@ -39,8 +57,8 @@ ssh wa-bot 'docker stop -t 120 valheim'
 ssh wa-bot 'docker start valheim'
 ```
 
-`unless-stopped` restarts the container after host reboot unless manually stopped.
-Limits: 8 GiB memory, no extra swap allowance, 1.5 CPU cores; Docker logs rotate at
+The shared controller now owns reboot behavior; the container uses `restart=no`.
+Limits: 9 GiB memory, no extra swap allowance, 1.5 CPU cores; Docker logs rotate at
 3 x 10 MB. Saves are in `persistentdata`, Steam files in `server`.
 The game saves every 15 minutes and retains six automatic backups.
 The upstream image also writes logs beneath `persistentdata/logs`; inspect their
@@ -73,8 +91,7 @@ set mode 600, pull the image, record its repository digest in `image.txt`, and r
 
 ## Availability and Discord operations
 
-Two optional, independent components are staged locally and are not installed on
-the live host yet:
+The repository includes:
 
 - `monitoring/` contains a one-minute systemd watchdog. It verifies the Docker
   container, actual Valheim process, and current PlayFab session; distinguishes
@@ -83,12 +100,13 @@ the live host yet:
   external dead-man heartbeat for whole-host outage detection.
 - `discord/` contains an outbound-only Discord bot with a persistent status card,
   transition alerts, player/join information, and admin-restricted restart and
-  backup commands. It consumes the watchdog state when available.
+  backup commands. `/game status` and admin-only `/game switch` use the internal
+  control API. It consumes the watchdog state when available.
 
-Both components coordinate through `.maintenance.lock`, preventing the watchdog
+The components coordinate through locks and desired game-slot state, preventing the watchdog
 from fighting an intentional backup or administrator restart. Install the
-watchdog first, then configure the Discord `.env` and enable the bot. See each
-directory's README for rollout and rollback instructions.
+watchdog first, then the controller, then configure Discord. See each directory's
+README for rollout and rollback instructions.
 
 ## Capacity
 

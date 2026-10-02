@@ -4,6 +4,7 @@ SERVER_DIR=/home/ubuntu/valheim-server-arm
 STATE_FILE=/var/lib/valheim-watchdog/state.json
 LOCK_FILE=/var/lib/valheim-watchdog/watchdog.lock
 MAINTENANCE_LOCK_FILE=/home/ubuntu/valheim-server-arm/.maintenance.lock
+GAME_SLOT_STATE_FILE=/var/lib/dapex-game-control/game-slot.json
 
 # Optional dead-man heartbeat URL (for example Healthchecks.io). It is pinged
 # after every completed check regardless of game status. Leave blank initially.

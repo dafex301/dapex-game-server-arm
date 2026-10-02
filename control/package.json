@@ -1,0 +1,23 @@
+{
+  "name": "dapex-game-control",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "check": "node --check src/server.js && node --check src/orchestrator.js && node --check src/profiles.js && node --check src/initialize-cli.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "dotenv": "16.4.7",
+    "express": "5.1.0",
+    "multer": "2.4.0",
+    "semver": "7.7.2",
+    "yazl": "3.3.1",
+    "yauzl": "3.4.0",
+    "zod": "4.1.11"
+  }
+}

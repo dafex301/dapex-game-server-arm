@@ -34,6 +34,7 @@ cat >"$tmp/config" <<EOF
 CONTAINER_NAME=valheim
 SERVER_DIR=$tmp/server
 LOCK_FILE=$tmp/watchdog.lock
+GAME_SLOT_STATE_FILE=$tmp/game-slot.json
 STARTUP_GRACE_SECONDS=0
 RESTART_WINDOW_SECONDS=3600
 MAX_RESTARTS_PER_WINDOW=3
@@ -104,5 +105,12 @@ assert_json recovery.attempts_in_window 3
 FAKE_FLOCK_FAIL_SHARED=true VALHEIM_WATCHDOG_CONFIG=$tmp/config "$watchdog" --state-file "$state"
 assert_json status maintenance
 assert_json action none
+
+# Selecting Minecraft suppresses Valheim recovery and clears stale online state.
+printf '{"desired":"minecraft"}\n' >"$tmp/game-slot.json"
+FAKE_RUNNING=false VALHEIM_WATCHDOG_CONFIG=$tmp/config "$watchdog" --state-file "$state"
+assert_json status inactive
+assert_json action none
+assert_json checks.playfab_ready false
 
 echo 'watchdog tests passed'

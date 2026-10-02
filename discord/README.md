@@ -5,8 +5,12 @@ This bot runs on the same host as Docker and provides:
 - a single persistent status card, edited every poll;
 - transition-only alerts when state changes among online, starting, restarting,
   maintenance, degraded, offline, and unknown;
+- one-shot high-memory warnings in the alert channel, mentioning the configured
+  `valheim` role at 7 GiB and re-arming after usage drops to 6 GiB;
 - `/valheim status`, `/valheim join`, and `/valheim players`;
 - role-restricted `/valheim restart` and `/valheim backup` with cooldowns;
+- `/game status` and role-restricted `/game switch` for the shared exclusive
+  Valheim/Minecraft slot;
 - guild-scoped slash-command registration on startup.
 
 `/valheim join` intentionally never exposes the server password. It only shows the
@@ -42,6 +46,12 @@ ssh -t wa-bot '~/valheim-server-arm/discord/set-token.sh'
 The Discord bot needs `bot` and `applications.commands` scopes and these channel
 permissions: View Channel, Send Messages, Embed Links, and Read Message History.
 Privileged intents are not needed.
+
+Set `GAME_CONTROL_API_URL=http://127.0.0.1:8787` and give
+`GAME_CONTROL_API_TOKEN` the same long random value as
+`CONTROL_INTERNAL_TOKEN` in `control/.env`. The bot receives no Docker control
+path for `/game`; it calls the bounded local controller API with only the three
+accepted targets (`valheim`, `minecraft`, or `none`).
 
 ## systemd
 
@@ -80,6 +90,17 @@ watchdog observations as the authoritative lifecycle, reason, action, recovery,
 and join-code source. The bot accepts them only when they are recent and refer to
 the current container start (maintenance is accepted while the lock prevents a
 container observation). Direct Docker CPU and memory statistics are still used.
+
+Memory alert settings are configurable with `MEMORY_ALERT_GIB`,
+`MEMORY_ALERT_RESET_GIB`, `MEMORY_RESTART_GIB`, `MEMORY_RESTART_SAMPLES`,
+`MEMORY_RESTART_COUNTDOWN_SECONDS`, and `DISCORD_ALERT_ROLE_NAME`. The reset threshold
+must be lower than the alert threshold to prevent repeated mentions while usage
+remains high.
+
+When memory remains above the restart threshold for the configured number of
+polls, the bot posts a countdown and uses the existing graceful restart path.
+Valheim saves during shutdown; the regular `SERVER_SAVE_INTERVAL` remains
+unchanged.
 
 The unit intentionally does not set systemd's `NoNewPrivileges=true`: the current
 backup workflow may invoke narrowly scoped `sudo` operations. Membership in the

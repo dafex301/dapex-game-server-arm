@@ -5,8 +5,8 @@ cd "$(dirname "$0")/.."
 [ -f .env ] || { echo 'Create .env from .env.example first.' >&2; exit 1; }
 mkdir -p server persistentdata
 # Crossplay uses outbound PlayFab relays; no inbound ports are published.
-docker run -d --name valheim --restart unless-stopped \
-  --stop-timeout 120 --memory 8g --memory-swap 8g --cpus 1.5 \
+docker run -d --name valheim --restart no \
+  --stop-timeout 120 --memory 9g --memory-swap 9g --cpus 1.5 \
   --log-opt max-size=10m --log-opt max-file=3 \
   --env-file .env --entrypoint /bin/bash \
   -v "$PWD/scripts/entrypoint.sh:/opt/valheim-entrypoint.sh:ro" \

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyStatus, mergeWatchdogStatus, parseEnv, parseJoinCode, parsePlayerCount, parsePlayers } from '../src/valheim.js';
+import { classifyStatus, mergeWatchdogStatus, parseEnv, parseJoinCode, parseMemoryUsageGiB, parsePlayerCount, parsePlayers } from '../src/valheim.js';
 
 test('parseEnv preserves values containing spaces and equals signs', () => {
   assert.deepEqual(parseEnv('SERVER_NAME=mbg enak\nTOKEN=a=b\n# ignored\n'), {
@@ -26,6 +26,12 @@ test('parsePlayers replays joins and disconnects', () => {
 test('parsePlayerCount returns the latest authoritative log count', () => {
   assert.equal(parsePlayerCount('now 2 player(s)\nnow 5 player(s)'), 5);
   assert.equal(parsePlayerCount('no count here'), null);
+});
+
+test('parseMemoryUsageGiB parses Docker memory usage', () => {
+  assert.equal(parseMemoryUsageGiB('7.25GiB / 9GiB'), 7.25);
+  assert.equal(parseMemoryUsageGiB('7168MiB / 9GiB'), 7);
+  assert.equal(parseMemoryUsageGiB(null), null);
 });
 
 test('classifyStatus distinguishes container and game health', () => {

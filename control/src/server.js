@@ -1,0 +1,128 @@
+import 'dotenv/config';
+import { randomUUID } from 'node:crypto';
+import { mkdir, rm } from 'node:fs/promises';
+import path from 'node:path';
+import express from 'express';
+import multer from 'multer';
+import { z } from 'zod';
+import { createAuth, requireSameOrigin } from './auth.js';
+import { searchCurseForge, searchModrinth } from './catalog.js';
+import { loadConfig } from './config.js';
+import { createOrchestrator } from './orchestrator.js';
+import { createProfiles } from './profiles.js';
+
+const config = loadConfig();
+const orchestrator = createOrchestrator(config);
+const profiles = createProfiles(config);
+const app = express();
+const uploadDir = path.join(config.stateDir, 'incoming');
+await mkdir(uploadDir, { recursive: true });
+const upload = multer({ dest: uploadDir, limits: { fileSize: config.maxUploadBytes, files: 1 } });
+const auth = createAuth(config);
+const operations = new Map();
+
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+app.use(express.json({ limit: '128kb' }));
+app.use(express.static(path.join(import.meta.dirname, '..', 'public'), { index: false, maxAge: '5m' }));
+
+const asyncRoute = (handler) => (request, response, next) => Promise.resolve(handler(request, response, next)).catch(next);
+const querySchema = z.object({ query: z.string().trim().min(2).max(100), source: z.enum(['modrinth', 'curseforge']).default('modrinth') });
+const addSchema = z.object({ source: z.literal('modrinth'), projectId: z.string().min(1).max(100), slug: z.string().max(100).nullable().optional(), name: z.string().min(1).max(200) });
+const versionSchema = z.object({ version: z.string().regex(/^\d+\.\d+(?:\.\d+)?$/) });
+const switchSchema = z.object({ target: z.enum(['valheim', 'minecraft', 'none']) });
+
+app.get('/', (request, response) => {
+  const playerHost = new URL(config.playerBaseUrl).hostname;
+  const page = request.hostname === playerHost ? 'play.html' : 'admin.html';
+  response.sendFile(path.join(import.meta.dirname, '..', 'public', page));
+});
+app.get('/play', (_request, response) => response.sendFile(path.join(import.meta.dirname, '..', 'public', 'play.html')));
+
+app.get('/api/public', asyncRoute(async (_request, response) => {
+  const [status, profile] = await Promise.all([orchestrator.status(), profiles.active()]);
+  response.json({ status: { active: status.active, stats: status.stats }, profile, minecraftAddress: config.minecraftAddress, clientPack: profile.release ? `/downloads/dapex-fabric-v${profile.release}.mrpack` : null });
+}));
+app.get('/downloads/dapex-fabric-v:release.mrpack', asyncRoute(async (request, response) => {
+  if (!/^\d+$/.test(request.params.release)) return response.status(404).json({ error: 'Release not found' });
+  const release = Number(request.params.release);
+  const file = await profiles.clientPackFile(release);
+  if (!file) return response.status(404).json({ error: 'Release not found' });
+  response.download(file, `Dapex-Fabric-v${release}.mrpack`);
+}));
+
+app.use('/api/admin', auth, requireSameOrigin(config));
+app.get('/api/admin/status', asyncRoute(async (request, response) => {
+  const [status, active, draft] = await Promise.all([orchestrator.status(), profiles.active(), profiles.draft()]);
+  response.json({ actor: request.actor, status, active, draft, compatibility: profiles.compatibility(draft), capabilities: { curseForgeSearch: Boolean(config.curseForgeApiKey) } });
+}));
+app.post('/api/admin/switch', asyncRoute(async (request, response) => {
+  const { target } = switchSchema.parse(request.body);
+  const id = randomUUID();
+  const operation = { id, type: 'switch', target, state: 'running', actor: request.actor, startedAt: new Date().toISOString() };
+  operations.set(id, operation);
+  void orchestrator.switchGame(target, request.actor).then((result) => {
+    operations.set(id, { ...operation, state: 'complete', completedAt: new Date().toISOString(), result });
+  }).catch((error) => {
+    operations.set(id, { ...operation, state: 'failed', completedAt: new Date().toISOString(), error: error.message });
+  });
+  while (operations.size > 100) operations.delete(operations.keys().next().value);
+  response.status(202).json(operation);
+}));
+app.get('/api/admin/operations/:id', (request, response) => {
+  const operation = operations.get(request.params.id);
+  if (!operation) return response.status(404).json({ error: 'Operation not found or the controller restarted' });
+  response.json(operation);
+});
+app.get('/api/admin/catalog', asyncRoute(async (request, response) => {
+  const { query, source } = querySchema.parse(request.query);
+  const draft = await profiles.draft();
+  const results = source === 'modrinth'
+    ? await searchModrinth(query, draft.minecraftVersion)
+    : await searchCurseForge(query, draft.minecraftVersion, config.curseForgeApiKey);
+  response.json({ results });
+}));
+app.post('/api/admin/mods', asyncRoute(async (request, response) => {
+  const mod = addSchema.parse(request.body);
+  response.status(201).json(await profiles.addModrinth(mod, request.actor));
+}));
+app.delete('/api/admin/mods/:key', asyncRoute(async (request, response) => response.json(await profiles.removeMod(decodeURIComponent(request.params.key)))));
+app.post('/api/admin/upload', upload.single('file'), asyncRoute(async (request, response) => {
+  if (!request.file) throw new Error('A file is required');
+  try {
+    response.status(201).json(await profiles.importUpload(request.file.path, request.file.originalname, request.actor));
+  } catch (error) {
+    await rm(request.file.path, { force: true });
+    throw error;
+  }
+}));
+app.post('/api/admin/version', asyncRoute(async (request, response) => {
+  const { version } = versionSchema.parse(request.body);
+  response.json(await profiles.setVersion(version));
+}));
+app.post('/api/admin/publish', asyncRoute(async (request, response) => {
+  const status = await orchestrator.status();
+  if (status.active === 'minecraft') throw new Error('Stop or switch away from Minecraft before publishing a profile');
+  response.status(201).json(await profiles.publish(request.actor));
+}));
+
+app.use((error, request, response, _next) => {
+  console.error(`${request.method} ${request.path}:`, error);
+  if (error instanceof z.ZodError) {
+    response.status(400).json({ error: 'Invalid request', details: error.issues });
+    return;
+  }
+  if (error.code === 'LIMIT_FILE_SIZE') {
+    response.status(413).json({ error: `Upload exceeds ${config.maxUploadBytes / 1024 / 1024} MiB` });
+    return;
+  }
+  response.status(500).json({ error: error.message || 'Unexpected control service error' });
+});
+
+const server = app.listen(config.port, config.host, () => {
+  console.log(`Dapex game control listening on http://${config.host}:${config.port}`);
+});
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.once(signal, () => server.close(() => process.exit(0)));
+}

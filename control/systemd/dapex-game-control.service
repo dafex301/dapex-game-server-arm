@@ -1,0 +1,24 @@
+[Unit]
+Description=Dapex game server control plane
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+Group=docker
+WorkingDirectory=@DEPLOY_DIR@/control
+EnvironmentFile=@DEPLOY_DIR@/control/.env
+ExecStart=@NODE_BIN@ @DEPLOY_DIR@/control/src/server.js
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@DEPLOY_DIR@ /var/lib/dapex-game-control /var/lock/dapex-game-control.lock
+
+[Install]
+WantedBy=multi-user.target

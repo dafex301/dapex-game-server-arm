@@ -1,0 +1,16 @@
+fetch('/api/public').then((response) => response.json()).then(({ status, profile, minecraftAddress, clientPack }) => {
+  document.querySelector('#player-state').textContent = status.active === 'minecraft' ? 'MINECRAFT ONLINE' : status.active === 'valheim' ? 'VALHEIM ACTIVE' : 'SERVER IDLE';
+  document.querySelector('#player-light').classList.toggle('online', status.active === 'minecraft');
+  document.querySelector('#server-address').textContent = minecraftAddress;
+  document.querySelector('#player-release').textContent = profile.release ? `${profile.name} v${profile.release}` : 'Preparing v1';
+  document.querySelector('#player-version').textContent = profile.minecraftVersion;
+  if (clientPack) {
+    const download = document.querySelector('#pack-download');
+    download.href = clientPack;
+    download.textContent = `DOWNLOAD ${profile.name.toUpperCase()} V${profile.release}`;
+    download.classList.remove('disabled');
+    download.removeAttribute('aria-disabled');
+  }
+}).catch(() => {
+  document.querySelector('#player-state').textContent = 'STATUS UNAVAILABLE';
+});

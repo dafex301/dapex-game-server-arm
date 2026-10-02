@@ -5,6 +5,7 @@ const presentation = {
   starting: { icon: '🟡', label: 'Starting', color: 0xfee75c },
   restarting: { icon: '🟠', label: 'Restarting', color: 0xfaa61a },
   maintenance: { icon: '🔧', label: 'Maintenance', color: 0x3498db },
+  inactive: { icon: '🎮', label: 'Inactive — another game selected', color: 0x5865f2 },
   degraded: { icon: '🔴', label: 'Game process stopped', color: 0xed4245 },
   down: { icon: '⚫', label: 'Offline', color: 0x747f8d },
   unknown: { icon: '❔', label: 'Unknown', color: 0x9b59b6 },
@@ -55,6 +56,19 @@ export function transitionEmbed(previous, current) {
     .setColor(view.color)
     .setDescription(`State changed from **${display(previous).label}** to **${view.label}**.`)
     .setTimestamp(current.checkedAt);
+}
+
+export function memoryWarningEmbed(status, usedGiB, thresholdGiB) {
+  return new EmbedBuilder()
+    .setTitle('⚠️ Valheim memory warning')
+    .setColor(0xed4245)
+    .setDescription(`**${status.serverName}** is using **${usedGiB.toFixed(2)} GiB** of memory. The warning threshold is **${thresholdGiB} GiB**.`)
+    .addFields(
+      { name: 'Current usage', value: status.memory || `${usedGiB.toFixed(2)} GiB`, inline: true },
+      { name: 'Players', value: `${status.playerCount ?? 0}`, inline: true },
+      { name: 'Action', value: 'Save progress and expect an automatic restart if memory continues toward the 9 GiB container limit.' },
+    )
+    .setTimestamp(status.checkedAt);
 }
 
 export function statusText(status) {
