@@ -1,150 +1,169 @@
-# Dapex game host on wa-bot (ARM64)
+# Dapex Game Server ARM
 
-One portable repository manages two dedicated games on the same small ARM host:
+A self-hosted multiplayer game platform for running **Valheim** and a modded
+**Minecraft Fabric** server on one ARM64 machine.
 
-- Valheim (`valheim`) with the existing world and Discord operations;
-- Minecraft Java Fabric (`minecraft`), initially pinned to 1.21.1;
-- a localhost-only control plane that enforces an exclusive game slot, manages
-  the Dapex Fabric profile, and serves admin/player web pages through Cloudflare.
+Small ARM servers are capable of hosting either game, but running both at once
+creates unnecessary CPU and memory contention. This project treats the machine
+as one exclusive game slot: Valheim, Minecraft, or offline. A local controller
+performs every transition, verifies that the selected server is ready, and rolls
+back to the previous game when startup fails.
 
-Only one game may run. The controller stops the current container, starts the
-selected one, verifies Docker readiness, and restores the previous game if the
-new target fails. Both containers use `restart=no`; a boot reconciler restores
-the desired slot rather than allowing Docker to start both independently.
+The repository also includes a web dashboard, a player-facing Minecraft pack
+portal, Discord operations, backups, health monitoring, and systemd deployment.
 
-See [control/README.md](control/README.md) for installation, Cloudflare routing,
-security, and rollback. See [minecraft/README.md](minecraft/README.md) for the
-Fabric profile and player flow.
+## What it does
 
-## Valheim
+- Runs Valheim on ARM64 through Box64/Wine using
+  [`tsx-cloud/valheim-arm`](https://github.com/tsx-cloud/valheim-arm).
+- Runs Minecraft Java 1.21.1 with Fabric and Java 21 using a pinned
+  [`itzg/minecraft-server`](https://github.com/itzg/docker-minecraft-server)
+  image.
+- Guarantees that Valheim and Minecraft cannot intentionally run together.
+- Switches games gracefully and restores the previous server after a failed boot.
+- Reconciles the selected game automatically after a host restart.
+- Provides a private admin dashboard and a public player onboarding page.
+- Builds versioned **Dapex Fabric** releases that players can import into Prism
+  Launcher as `.mrpack` files.
+- Supports pinned Modrinth projects, required dependency resolution, manual
+  Fabric JAR uploads, and CurseForge modpack manifests through the official API.
+- Verifies downloaded file hashes and respects CurseForge author distribution
+  permissions.
+- Keeps Docker logs bounded and game data outside the containers.
 
-Vanilla world `kopdes`, server `mbg enak`, intended for up to six PC players.
-Runs the Windows dedicated server through Box64/Wine using
-[tsx-cloud/valheim-arm](https://github.com/tsx-cloud/valheim-arm).
-Upstream code was inspected before deployment. The container image is pinned in
-`image.txt`; Steam downloads/updates the game on each container startup.
+## Architecture
 
-## Connection
-
-Crossplay is enabled so players can use the PlayFab join code from the server log.
-In Valheim, select Join Game -> Add server and enter the join code, then the password.
-The code can change on restart. Retrieve current connection details:
-
-```sh
-ssh wa-bot 'docker logs --tail 300 valheim 2>&1 | grep -iE "join code|session.*active|game server connected"'
-ssh wa-bot 'cat ~/valheim-server-arm/.env'
+```text
+                         Cloudflare Access
+                                │
+                    ┌───────────▼───────────┐
+                    │ Admin dashboard       │
+                    │ server.example.com    │
+                    └───────────┬───────────┘
+                                │ localhost:8787
+Discord bot ── bearer token ──► Game controller ◄── Player portal
+                                │                    + MRPACK downloads
+                       exclusive operation lock
+                         ┌───────┴────────┐
+                         │                │
+                    Valheim           Minecraft
+                  Box64 + Wine       Fabric + Java 21
+                         │                │
+                   world saves       world + mods
 ```
 
-The password is randomly generated and stored only on the server in `.env` (mode 600).
-Do not commit it. Crossplay works for Steam PC clients too.
+Both game containers use `restart=no`. The controller is the only component that
+owns desired game state and boot reconciliation. The Valheim watchdog reads that
+same state, so it will not mistake an intentional switch to Minecraft for an
+outage and restart Valheim behind it.
 
-[Valheim's official guide](https://www.valheimgame.com/support/a-guide-to-dedicated-servers/)
-says crossplay does not need port forwarding. No inbound game ports are published.
-Ordinary [Cloudflare Tunnel public hostnames](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/routing-to-tunnel/protocols/)
-do not expose UDP. Private Cloudflare networking would require player-side client setup.
-For direct Steam networking instead, disable crossplay and publish UDP 2456-2457,
-then allow those ports in both Oracle Cloud ingress rules and the host firewall.
-A Cloudflare DNS record would need DNS-only mode for that direct connection.
+## Discord integration
 
-## Operations
+The included Discord bot keeps operations in the same place players already
+coordinate:
 
-Remote directory: `/home/ubuntu/valheim-server-arm`.
+- a persistent Valheim status card;
+- transition and high-memory alerts;
+- current Valheim player count and PlayFab join code;
+- `/valheim status`, `/valheim join`, and `/valheim players`;
+- admin-only `/valheim restart` and `/valheim backup`;
+- `/game status` for the shared game slot;
+- admin-only `/game switch` for Valheim, Minecraft, or offline.
+
+Discord never receives direct Docker access from a command. Game switching goes
+through the bounded localhost control API, uses the same exclusive lock as the
+web dashboard, and accepts only the three known targets.
+
+## Minecraft mod workflow
+
+1. An administrator selects the Minecraft and Fabric versions.
+2. Mods are added from Modrinth, uploaded as Fabric JARs, or imported from a
+   CurseForge modpack ZIP.
+3. The controller resolves exact versions and required dependencies.
+4. Compatibility and distribution rules are checked before publishing.
+5. Publishing creates an immutable release manifest, the server mod directory,
+   configuration overrides, and a versioned MRPACK.
+6. Players import that MRPACK into Prism Launcher and connect with their normal
+   Microsoft-authenticated Minecraft Java account.
+
+Minecraft runs with `online-mode=true` and a whitelist. Current Prism Launcher
+releases require a supported modern operating system; Windows 7 is best-effort
+and is not a supported deployment target.
+
+## Repository layout
+
+| Path | Purpose |
+| --- | --- |
+| `control/` | Web UI, authentication, game orchestration, mod profiles, and systemd units |
+| `discord/` | Discord status, alerts, backups, and game-switch commands |
+| `minecraft/` | Minecraft environment template, pinned image, world and generated-profile mounts |
+| `monitoring/` | Valheim process/PlayFab watchdog and bounded recovery policy |
+| `scripts/` | Container entrypoints, startup scripts, and consistent backups |
+
+Detailed documentation:
+
+- [Control plane, security, Cloudflare, and rollback](control/README.md)
+- [Minecraft profiles and player onboarding](minecraft/README.md)
+- [Valheim watchdog](monitoring/README.md)
+- [Discord operations](discord/README.md)
+
+## Resource model
+
+The production host that motivated this project is an ARM64 VM with two CPU
+cores and roughly 12 GB RAM. Current container limits are:
+
+| Game | Memory | CPU | Typical idle memory |
+| --- | ---: | ---: | ---: |
+| Valheim | 9 GiB | 1.5 cores | approximately 2.7 GiB |
+| Minecraft Fabric | 7 GiB | 1.75 cores | approximately 1 GiB without mods |
+
+These are operational limits, not player-capacity guarantees. Mod complexity,
+world generation, base size, exploration, and concurrent players must be tested
+with the actual pack and world.
+
+## Deployment outline
+
+The host requires Docker, Node.js 20+, `flock`, systemd, and an ARM64 Linux
+environment.
 
 ```sh
-ssh wa-bot 'docker logs --tail 100 valheim'
-ssh wa-bot 'docker stats --no-stream valheim'
-ssh wa-bot 'docker stop -t 120 valheim'
-ssh wa-bot 'docker start valheim'
+cp .env.example .env
+cp minecraft/.env.example minecraft/.env
+cp control/.env.example control/.env
+cp discord/.env.example discord/.env
+chmod 600 .env minecraft/.env control/.env discord/.env
 ```
 
-The shared controller now owns reboot behavior; the container uses `restart=no`.
-Limits: 9 GiB memory, no extra swap allowance, 1.5 CPU cores; Docker logs rotate at
-3 x 10 MB. Saves are in `persistentdata`, Steam files in `server`.
-The game saves every 15 minutes and retains six automatic backups.
-The upstream image also writes logs beneath `persistentdata/logs`; inspect their
-size periodically because Docker log rotation does not cover those files.
+Configure strong unique secrets and the required IDs, then install the watchdog
+and controller according to their directory READMEs. The control service binds
+to `127.0.0.1` and should only be exposed through a protected reverse tunnel.
 
-For a consistent manual backup (brief downtime):
+Minecraft uses raw TCP port 25565. A normal Cloudflare Tunnel public hostname
+does not proxy a vanilla Minecraft connection, so its DNS record must remain
+DNS-only and the port must be allowed by both the cloud firewall and host
+firewall.
 
-```sh
-ssh wa-bot 'cd ~/valheim-server-arm && ./scripts/backup.sh'
-```
+## Security model
 
-Copy the resulting archive off the host for protection against host loss.
-To restore, stop Valheim, back up the current directory, extract the archive into
-the deployment directory, then start Valheim. Archives contain `persistentdata/`.
+- No real secrets, world saves, backups, uploaded mods, or runtime state belong
+  in Git.
+- Admin web traffic is expected to pass through Cloudflare Access and an exact
+  email allowlist.
+- Browser mutations require the configured same origin.
+- Discord authenticates with a separate same-host bearer token.
+- Uploaded archives are inspected without unsafe extraction and are constrained
+  by path, symlink, entry-count, and expanded-size limits.
+- Container images and published mod versions are pinned.
+- Docker group membership is root-equivalent; the control service is an
+  operational boundary, not a sandbox against a compromised host account.
 
-To change settings, edit the remote `.env`, then back up and recreate the container
-(the bind-mounted world survives container removal):
+## Project status
 
-```sh
-cd ~/valheim-server-arm
-./scripts/backup.sh
-docker stop -t 120 valheim
-docker rm valheim
-VALHEIM_IMAGE="$(cat image.txt)" ./scripts/start.sh
-```
+The controller, both game containers, Discord integration, watchdog, profile
+publishing, and rollback flow have been exercised on an ARM64 host. Valheim and
+Minecraft were each booted to application-level readiness, switched in both
+directions, and verified never to run concurrently.
 
-For initial installation: copy `.env.example` to `.env`, choose a strong password,
-set mode 600, pull the image, record its repository digest in `image.txt`, and run
-`VALHEIM_IMAGE="$(cat image.txt)" ./scripts/start.sh`.
-
-## Availability and Discord operations
-
-The repository includes:
-
-- `monitoring/` contains a one-minute systemd watchdog. It verifies the Docker
-  container, actual Valheim process, and current PlayFab session; distinguishes
-  startup and intentional maintenance; and performs at most three recoveries per
-  hour with exponential backoff. It writes atomic JSON state and can ping an
-  external dead-man heartbeat for whole-host outage detection.
-- `discord/` contains an outbound-only Discord bot with a persistent status card,
-  transition alerts, player/join information, and admin-restricted restart and
-  backup commands. `/game status` and admin-only `/game switch` use the internal
-  control API. It consumes the watchdog state when available.
-
-The components coordinate through locks and desired game-slot state, preventing the watchdog
-from fighting an intentional backup or administrator restart. Install the
-watchdog first, then the controller, then configure Discord. See each directory's
-README for rollout and rollback instructions.
-
-## Capacity
-
-Inspected 2026-09-13: Oracle ARM Neoverse-N1, 2 cores, 12 GB RAM, Ubuntu 24.04,
-approximately 48 GB free disk before installation. Existing Node/PM2 applications
-share the host. Six-player capacity and latency require gameplay testing; startup
-and idle resource usage alone cannot establish this. Large bases and exploration
-may expose CPU limits under emulation.
-
-## Deployment validation (2026-09-13)
-
-Installed Valheim 1.0.12 (network version 40). Fresh world generation completed
-and PlayFab reported an active session. Initial idle sample: 2.65 GiB RAM and
-approximately 18% of one CPU core; this is not a six-player benchmark.
-Graceful shutdown completed in approximately five seconds and produced the world
-save. The backup archive was inspected and copied to local `backups/`.
-This game version stores the world under `worlds_local/WaBot/` using `.db2`,
-`.fwl2`, and chunk files; back up the entire directory rather than assuming two
-legacy `.db`/`.fwl` files.
-
-First install encountered SteamCMD `Missing configuration`; a retry downloaded
-the game successfully. The upstream entrypoint does not stop immediately on an
-unsuccessful Steam install. Check logs for a successful install and an active
-PlayFab session; a running container alone is not a readiness check.
-
-Reviewed upstream revision: `3ed9b27bca9b9b6637e0eb17415912e1e5200a9a`.
-Restart validation passed: the existing world loaded and a new PlayFab session
-became active. Post-restart idle sample was 2.74 GiB RAM and 17.5% of one CPU core.
-Player login and six-player gameplay have not been tested.
-
-During a five-player session on 2026-09-13, world generation pushed the game past
-the original 6 GiB container limit and the kernel killed it after a successful
-save. The limit was raised to 8 GiB. The local entrypoint wrapper also tracks the
-Valheim pipeline explicitly so an unexpected game exit terminates the container
-and allows Docker's restart policy to recover it; upstream otherwise keeps the
-container alive via Xvfb while the game is no longer running.
-
-Current world preset: **Hard** (`SERVER_PRESET=hard`). The entrypoint wrapper adds
-the official `-preset` argument to the pinned upstream startup script. This
-reapplies the preset on startup, overriding other world modifiers. World identity
-and progress are preserved.
+This is a personal, non-commercial project for a small private group. It is not
+affiliated with Iron Gate, Mojang, Microsoft, Fabric, Modrinth, CurseForge,
+Overwolf, or the upstream container authors.
