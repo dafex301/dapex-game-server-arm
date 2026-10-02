@@ -22,7 +22,7 @@ rather than being guessed.
 
 ## Player workflow
 
-The public page at `play.server.fahrelgibran.com` shows the active release and a
+The public page at `play.fahrelgibran.com` shows the active release and a
 versioned `.mrpack` download. In Prism Launcher, use **Add Instance -> Import**,
 select the file, sign into the player's original Microsoft account, and connect
 to `mc.fahrelgibran.com` after the username has been added to the whitelist.

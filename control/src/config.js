@@ -24,7 +24,7 @@ export function loadConfig() {
     host: process.env.CONTROL_HOST?.trim() || '127.0.0.1',
     port: integer('CONTROL_PORT', 8787),
     baseUrl: process.env.CONTROL_BASE_URL?.trim() || 'https://server.fahrelgibran.com',
-    playerBaseUrl: process.env.PLAYER_BASE_URL?.trim() || 'https://play.server.fahrelgibran.com',
+    playerBaseUrl: process.env.PLAYER_BASE_URL?.trim() || 'https://play.fahrelgibran.com',
     minecraftAddress: process.env.MINECRAFT_ADDRESS?.trim() || 'mc.fahrelgibran.com',
     allowedEmails: new Set((process.env.CONTROL_ALLOWED_EMAILS || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean)),
     internalToken: process.env.CONTROL_INTERNAL_TOKEN?.trim() || null,

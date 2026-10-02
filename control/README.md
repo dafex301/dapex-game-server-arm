@@ -59,7 +59,7 @@ sudo systemctl status dapex-game-control dapex-game-reconcile
 
 - `server.fahrelgibran.com` -> Tunnel -> `http://127.0.0.1:8787`, protected by
   Cloudflare Access and the configured exact email allowlist.
-- `play.server.fahrelgibran.com` -> the same Tunnel origin, public player page.
+- `play.fahrelgibran.com` -> the same Tunnel origin, public player page.
 - `mc.fahrelgibran.com` -> DNS-only A/AAAA record to the VM public address.
 
 Minecraft is raw TCP on port 25565. A normal Cloudflare Tunnel hostname cannot
