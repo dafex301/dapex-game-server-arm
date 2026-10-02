@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { copyFile, mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import semver from 'semver';
 import yazl from 'yazl';
@@ -74,6 +74,15 @@ function writeZip(zip, destination) {
     });
     zip.end();
   });
+}
+
+async function exposeToContainer(directory) {
+  await chmod(directory, 0o755);
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) await exposeToContainer(target);
+    else if (entry.isFile()) await chmod(target, 0o644);
+  }
 }
 
 export function createProfiles(config) {
@@ -238,7 +247,7 @@ export function createProfiles(config) {
     const serverOverrides = path.join(buildDir, 'server-overrides');
     await rm(buildDir, { recursive: true, force: true });
     await mkdir(path.dirname(generatedDir), { recursive: true });
-    await mkdir(serverMods, { recursive: true });
+    await Promise.all([mkdir(serverMods, { recursive: true }), mkdir(serverOverrides, { recursive: true })]);
     const indexFiles = [];
     const clientOverrides = [];
     for (const mod of profile.mods) {
@@ -293,6 +302,8 @@ export function createProfiles(config) {
     for (const file of clientOverrides) zip.addFile(file.source, file.path);
     await writeZip(zip, path.join(buildDir, `dapex-fabric-v${profile.release}.mrpack`));
     await writeJsonAtomic(path.join(buildDir, 'profile.json'), profile);
+    await exposeToContainer(serverMods);
+    await exposeToContainer(serverOverrides);
     const previous = `${generatedDir}.previous`;
     await rm(previous, { recursive: true, force: true });
     try { await rename(generatedDir, previous); } catch (error) { if (error.code !== 'ENOENT') throw error; }
