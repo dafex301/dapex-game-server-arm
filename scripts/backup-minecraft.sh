@@ -29,6 +29,12 @@ archive="backups/minecraft/dapex-fabric-$timestamp.tar.gz"
 sudo tar -czf "$archive" minecraft/data minecraft/generated
 sudo chown "$(id -u):$(id -g)" "$archive"
 tar -tzf "$archive" >/dev/null
+current_size=$(stat -c %s "$archive")
+if (( current_size > max_bytes )); then
+  rm -f -- "$archive"
+  echo 'Minecraft backup exceeds the entire 8 GiB local snapshot budget.' >&2
+  exit 1
+fi
 
 # Local snapshots are quick rollback copies, not an unbounded archive. Off-host
 # history is retained separately by restic/R2.
@@ -42,4 +48,5 @@ for snapshot in "${snapshots[@]}"; do
   total=$((total + size))
   if (( total > max_bytes )); then rm -f -- "$snapshot"; fi
 done
+[[ -f $archive ]] || { echo 'New Minecraft backup was not retained.' >&2; exit 1; }
 echo "$archive"
