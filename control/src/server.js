@@ -160,7 +160,7 @@ app.post('/api/admin/backups', asyncRoute(async (_request, response) => response
 app.patch('/api/admin/minecraft/settings', asyncRoute(async (request, response) => {
   const status = await orchestrator.status();
   if (status.active === 'minecraft') {
-    const error = new Error('Stop Minecraft before applying server settings');
+    const error = new Error('Minecraft is running. Enter Maintenance first, save the settings, then start Minecraft again.');
     error.status = 409;
     throw error;
   }

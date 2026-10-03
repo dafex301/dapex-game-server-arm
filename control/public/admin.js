@@ -10,8 +10,8 @@ async function api(url, options = {}) {
 
 function toast(message, error = false) {
   const node = $('#toast');
-  node.textContent = message;
-  node.classList.toggle('error', error);
+  node.textContent = message || 'The request could not be completed';
+  node.classList.toggle('toast-error', error);
   node.classList.add('show');
   setTimeout(() => node.classList.remove('show'), 4000);
 }
@@ -20,6 +20,13 @@ function modKey(mod) { return `${mod.source}:${mod.projectId || mod.sha256}`; }
 function sideLabel(side) { return typeof side === 'object' && side ? `client:${side.client || '?'} / server:${side.server || '?'}` : String(side || 'unknown'); }
 function bytes(value) { return value >= 1024 ** 3 ? `${(value / 1024 ** 3).toFixed(1)} GiB` : value >= 1024 ** 2 ? `${(value / 1024 ** 2).toFixed(1)} MiB` : value >= 1024 ? `${(value / 1024).toFixed(1)} KiB` : `${value} B`; }
 function filePath(name = '') { return [state.files.path, name].filter(Boolean).join('/'); }
+function fileTypeIcon(name) {
+  const extension = name.split('.').pop()?.toLowerCase();
+  if (extension === 'json' || extension === 'json5') return '<i class="file-type-icon json">{ }</i>';
+  if (['properties', 'conf', 'cfg', 'toml'].includes(extension)) return '<i class="file-type-icon config">⚙</i>';
+  if (['txt', 'md', 'log'].includes(extension)) return '<i class="file-type-icon text">≡</i>';
+  return '<i class="file-type-icon generic">·</i>';
+}
 
 function render() {
   const { status, active, draft, compatibility } = state.payload;
@@ -204,6 +211,7 @@ async function refreshFiles() {
     const listing = await api(`/api/admin/files?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}`);
     state.files.listing = listing;
     document.querySelectorAll('[data-file-scope]').forEach((node) => node.classList.toggle('active', node.dataset.fileScope === scope));
+    const activeTreeNode = document.querySelector(`[data-file-scope="${scope}"]`);
     const segments = path.split('/').filter(Boolean);
     $('#file-breadcrumb').innerHTML = [`<button data-crumb="">${escapeHtml(scope)}</button>`, ...segments.map((segment, index) => `<span>›</span><button data-crumb="${encodeURIComponent(segments.slice(0, index + 1).join('/'))}">${escapeHtml(segment)}</button>`)].join('');
     $('#file-scope-note').textContent = `${listing.description}${listing.writable ? ' · writable while Minecraft is offline' : ' · read-only'}`;
@@ -211,10 +219,11 @@ async function refreshFiles() {
     $('#file-upload-button').disabled = !listing.writable;
     $('#file-new-folder').disabled = !listing.writable;
     $('#file-tree-children').innerHTML = listing.entries.filter((entry) => entry.type === 'directory').map((entry) => `<button class="tree-node child" data-tree-folder="${encodeURIComponent(entry.name)}"><span>›</span><i class="folder-icon"></i>${escapeHtml(entry.name)}</button>`).join('');
+    activeTreeNode?.insertAdjacentElement('afterend', $('#file-tree-children'));
     $('#file-list').innerHTML = listing.entries.length ? listing.entries.map((entry) => {
       const relative = filePath(entry.name);
       const download = `/api/admin/files/download?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(relative)}`;
-      return `<div class="file-row" data-row-type="${entry.type}"><span class="file-kind ${entry.type}"><i class="${entry.type === 'directory' ? 'folder-icon' : 'document-icon'}"></i></span><button class="file-open" data-file-open="${encodeURIComponent(entry.name)}" data-type="${entry.type}" data-editable="${entry.editable}">${escapeHtml(entry.name)}</button><small>${entry.type === 'file' ? bytes(entry.size) : 'File folder'}</small><small>${new Date(entry.modifiedAt).toLocaleString()}</small><span class="file-actions">${entry.type === 'file' ? `<a href="${download}" title="Download">↓</a>` : ''}${listing.writable ? `<button class="delete" data-file-delete="${encodeURIComponent(entry.name)}" title="Delete">×</button>` : ''}</span></div>`;
+      return `<div class="file-row" data-row-type="${entry.type}"><span class="file-kind ${entry.type}">${entry.type === 'directory' ? '<i class="folder-icon"></i>' : fileTypeIcon(entry.name)}</span><button class="file-open" data-file-open="${encodeURIComponent(entry.name)}" data-type="${entry.type}" data-editable="${entry.editable}">${escapeHtml(entry.name)}</button><small>${entry.type === 'file' ? bytes(entry.size) : 'File folder'}</small><small>${new Date(entry.modifiedAt).toLocaleString()}</small><span class="file-actions">${entry.type === 'file' ? `<a href="${download}" title="Download">↓</a>` : ''}${listing.writable ? `<button class="delete" data-file-delete="${encodeURIComponent(entry.name)}" title="Delete">×</button>` : ''}</span></div>`;
     }).join('') : '<div class="file-empty"><i class="folder-icon"></i><strong>This folder is empty</strong><p>Drop a file here or create a folder.</p></div>';
   } catch (error) {
     $('#file-list').innerHTML = `<div class="file-empty error"><strong>Could not open this folder</strong><p>${escapeHtml(error.message)}</p><button id="file-retry">Try again</button></div>`;
