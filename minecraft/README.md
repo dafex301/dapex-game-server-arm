@@ -28,10 +28,16 @@ rather than being guessed.
 
 ## Player workflow
 
-The public page at `play.fahrelgibran.com` shows the active release and a
-versioned `.mrpack` download. In Prism Launcher, use **Add Instance -> Import**,
-select the file, sign into the player's original Microsoft account, and connect
-to `mc.fahrelgibran.com` after the username has been added to the whitelist.
+The public page at `play.fahrelgibran.com` offers a Prism auto-update profile,
+a versioned `.mrpack` snapshot, and the legacy manual package. Modern players
+should import the auto-update ZIP once with **Add Instance -> Import**. Its
+Packwiz pre-launch task checks the active release on every launch, verifies
+hashes, downloads only changed client files, and removes files retired by the
+managed pack before Minecraft opens.
+
+The versioned `.mrpack` remains available as a recovery snapshot. In either
+case, sign into the player's original Microsoft account and connect to
+`mc.fahrelgibran.com` after the username has been added to the whitelist.
 
 The MRPACK pins Minecraft, Fabric Loader, Modrinth file URLs/hashes, and embeds
 manual JAR overrides. The exact same release can therefore be re-imported by

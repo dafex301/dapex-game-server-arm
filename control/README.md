@@ -13,7 +13,8 @@ Cloudflare Access policy. Never publish port 8787 directly.
 - Modrinth catalog search and exact version/hash resolution;
 - optional CurseForge search with an API key;
 - inspected manual Fabric JAR upload and complete CurseForge pack ZIP import;
-- immutable Dapex Fabric release manifests and downloadable MRPACK files.
+- immutable Dapex Fabric release manifests, downloadable MRPACK snapshots, and
+  a hash-verified Packwiz feed used by the import-once Prism profile.
 - an operations dashboard with bounded local backups, safe server settings,
   disk-reserve reporting, and backup-first world replacement.
 - a Minecraft-only file explorer for curated configuration, datapack, resource
@@ -28,6 +29,13 @@ and the pack's overrides are carried into both the server profile and MRPACK.
 Files whose authors disable API distribution fail the release explicitly rather
 than being silently omitted. Nested MRPACK import remains blocked; add those
 projects through the Modrinth catalog instead.
+
+Each successful publish also creates an immutable Packwiz directory and a Prism
+instance ZIP containing the pinned Packwiz bootstrapper. `play.fahrelgibran.com`
+serves the current `pack.toml` without caching, while versioned indexes,
+metadata, and uploaded blobs are immutable. Prism runs the client-side updater
+before launch, so an interrupted or invalid download prevents Minecraft from
+starting with a partially updated profile.
 
 Local Minecraft snapshots are deliberately bounded to five files, seven days,
 and 8 GiB while preserving a 15 GiB free-disk reserve. Creating a new world is

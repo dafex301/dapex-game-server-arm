@@ -30,6 +30,7 @@ app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(import.meta.dirname, '..', 'public'), { index: false, maxAge: '5m' }));
+app.use('/packwiz/releases', express.static(path.join(config.stateDir, 'profiles', 'dapex-fabric', 'packwiz'), { index: false, dotfiles: 'deny', immutable: true, maxAge: '1y' }));
 
 const asyncRoute = (handler) => (request, response, next) => Promise.resolve(handler(request, response, next)).catch(next);
 const querySchema = z.object({ query: z.string().trim().min(2).max(100), source: z.enum(['modrinth', 'curseforge']).default('modrinth') });
@@ -73,8 +74,15 @@ app.get('/play', (_request, response) => response.sendFile(path.join(import.meta
 
 app.get('/api/public', asyncRoute(async (_request, response) => {
   const [status, profile] = await Promise.all([orchestrator.status(), profiles.active()]);
-  const manualPackFile = profile.release ? await profiles.manualPackFile(profile.release) : null;
-  response.json({ status: { active: status.active, stats: status.stats }, profile, minecraftAddress: config.minecraftAddress, clientPack: profile.release ? `/downloads/dapex-fabric-v${profile.release}.mrpack` : null, manualPack: manualPackFile ? `/downloads/dapex-fabric-v${profile.release}-manual.zip` : null });
+  const [manualPackFile, autoPackFile] = profile.release ? await Promise.all([profiles.manualPackFile(profile.release), profiles.autoPackFile(profile.release)]) : [null, null];
+  response.json({ status: { active: status.active, stats: status.stats }, profile, minecraftAddress: config.minecraftAddress, clientPack: profile.release ? `/downloads/dapex-fabric-v${profile.release}.mrpack` : null, autoPack: autoPackFile ? `/downloads/dapex-fabric-auto-v${profile.release}.zip` : null, manualPack: manualPackFile ? `/downloads/dapex-fabric-v${profile.release}-manual.zip` : null });
+}));
+app.get('/packwiz/pack.toml', asyncRoute(async (_request, response) => {
+  const profile = await profiles.active();
+  const file = await profiles.packwizPackFile(profile.release);
+  if (!file) return response.status(404).type('text/plain').send('No auto-update pack has been published yet.');
+  response.set('Cache-Control', 'no-store');
+  response.type('text/plain').sendFile(file);
 }));
 app.get('/downloads/dapex-fabric-v:release.mrpack', asyncRoute(async (request, response) => {
   if (!/^\d+$/.test(request.params.release)) return response.status(404).json({ error: 'Release not found' });
@@ -89,6 +97,13 @@ app.get('/downloads/dapex-fabric-v:release-manual.zip', asyncRoute(async (reques
   const file = await profiles.manualPackFile(release);
   if (!file) return response.status(404).json({ error: 'Release not found' });
   response.download(file, `Dapex-Fabric-v${release}-Manual-Windows.zip`);
+}));
+app.get('/downloads/dapex-fabric-auto-v:release.zip', asyncRoute(async (request, response) => {
+  if (!/^\d+$/.test(request.params.release)) return response.status(404).json({ error: 'Release not found' });
+  const release = Number(request.params.release);
+  const file = await profiles.autoPackFile(release);
+  if (!file) return response.status(404).json({ error: 'Auto-update profile not found' });
+  response.download(file, `Dapex-Fabric-Auto-Update-v${release}.zip`);
 }));
 
 app.use('/api/admin', auth, requireSameOrigin(config));

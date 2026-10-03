@@ -9,6 +9,10 @@ import { readJson, writeJsonAtomic } from './files.js';
 import { resolveCurseForgeFile, resolveModrinthVersion, resolveModrinthVersionId } from './catalog.js';
 
 const allowedExtensions = new Set(['.jar', '.mrpack', '.zip']);
+const packwizBootstrap = {
+  url: 'https://github.com/packwiz/packwiz-installer-bootstrap/releases/download/v0.0.3/packwiz-installer-bootstrap.jar',
+  sha256: 'a8fbb24dc604278e97f4688e82d3d91a318b98efc08d5dbfcbcbcab6443d116c',
+};
 
 function initialProfile(config) {
   return {
@@ -105,6 +109,99 @@ function writeZip(zip, destination) {
 
 function powershellLiteral(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+function tomlString(value) {
+  return JSON.stringify(String(value));
+}
+
+function safePackwizName(value) {
+  return String(value).replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+async function ensurePackwizBootstrap(config) {
+  if (config.packwizBootstrapFile) return config.packwizBootstrapFile;
+  const destination = path.join(config.stateDir, 'tools', 'packwiz-installer-bootstrap.jar');
+  try {
+    if (await hashFile(destination) === packwizBootstrap.sha256) return destination;
+  } catch {}
+  const response = await fetch(packwizBootstrap.url, { redirect: 'follow', headers: { 'User-Agent': 'dapex-game-control/0.1 (packwiz bootstrap)' } });
+  if (!response.ok) throw new Error(`Packwiz bootstrap download failed (${response.status})`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (createHash('sha256').update(bytes).digest('hex') !== packwizBootstrap.sha256) throw new Error('Packwiz bootstrap SHA-256 mismatch');
+  await writeFileAtomic(destination, bytes);
+  return destination;
+}
+
+async function writePackwizDistribution(profile, destination, autoPackDestination, config, finalizedIndex, clientOverrides) {
+  await rm(destination, { recursive: true, force: true });
+  await mkdir(destination, { recursive: true });
+  const entries = [];
+  const usedMetadataNames = new Set();
+  const addExternalMod = async ({ name, filename, url, sha512, side = 'both', source = null }) => {
+    if (!filename || !sha512 || (!url && !source)) throw new Error(`Packwiz requires a URL and SHA-512 for ${name || filename || 'a mod'}`);
+    let metadataName = `${safePackwizName(path.parse(filename).name)}.pw.toml`;
+    for (let suffix = 2; usedMetadataNames.has(metadataName); suffix += 1) metadataName = `${safePackwizName(path.parse(filename).name)}-${suffix}.pw.toml`;
+    usedMetadataNames.add(metadataName);
+    if (source) {
+      const blobName = `${sha512.toLowerCase()}.jar`;
+      await mkdir(path.join(destination, 'blobs'), { recursive: true });
+      await copyFile(source, path.join(destination, 'blobs', blobName));
+      url = `${config.playerBaseUrl.replace(/\/$/, '')}/packwiz/releases/v${profile.release}/blobs/${blobName}`;
+    }
+    const metadata = `name = ${tomlString(name || filename)}\nfilename = ${tomlString(filename)}\nside = ${tomlString(side)}\n\n[download]\nurl = ${tomlString(url)}\nhash-format = "sha512"\nhash = "${sha512.toLowerCase()}"\n`;
+    const relative = `mods/${metadataName}`;
+    await writeFileAtomic(path.join(destination, relative), metadata);
+    entries.push({ file: relative, hash: createHash('sha256').update(metadata).digest('hex'), metafile: true });
+  };
+
+  for (const file of finalizedIndex.files.filter((item) => item.env?.client !== 'unsupported')) {
+    await addExternalMod({
+      name: path.posix.basename(file.path, '.jar'),
+      filename: path.posix.basename(file.path),
+      url: file.downloads?.[0],
+      sha512: file.hashes?.sha512,
+      side: file.env?.server === 'unsupported' ? 'client' : 'both',
+    });
+  }
+  for (const file of clientOverrides) {
+    const relative = file.path.replace(/^overrides\//, '');
+    if (relative.startsWith('mods/') && relative.endsWith('.jar')) {
+      const sha512 = await hashFile(file.source, 'sha512');
+      await addExternalMod({ name: path.posix.basename(relative, '.jar'), filename: path.posix.basename(relative), sha512, source: file.source });
+      continue;
+    }
+    const target = path.join(destination, relative);
+    await mkdir(path.dirname(target), { recursive: true });
+    await copyFile(file.source, target);
+    entries.push({ file: relative, hash: await hashFile(target) });
+  }
+  entries.sort((left, right) => left.file.localeCompare(right.file));
+  const index = [`hash-format = "sha256"`, '', ...entries.flatMap((entry) => [
+    '[[files]]',
+    `file = ${tomlString(entry.file)}`,
+    `hash = "${entry.hash}"`,
+    ...(entry.metafile ? ['metafile = true'] : []),
+    '',
+  ])].join('\n');
+  await writeFileAtomic(path.join(destination, 'index.toml'), index);
+  const indexHash = createHash('sha256').update(index).digest('hex');
+  const pack = `name = ${tomlString(profile.name)}\nauthor = "Dapex"\nversion = "${profile.release}"\npack-format = "packwiz:1.1.0"\n\n[index]\nfile = "index.toml"\nhash-format = "sha256"\nhash = "${indexHash}"\n\n[versions]\nminecraft = ${tomlString(profile.minecraftVersion)}\nfabric = ${tomlString(config.fabricLoaderVersion)}\n`;
+  await writeFileAtomic(path.join(destination, 'pack.toml'), pack);
+
+  const bootstrap = await ensurePackwizBootstrap(config);
+  const instance = `InstanceType=OneSix\nJoinServerOnLaunch=false\nMCLaunchMethod=LauncherPart\nOverrideCommands=true\nPreLaunchCommand=\"$INST_JAVA\" -jar packwiz-installer-bootstrap.jar -s client ${config.playerBaseUrl.replace(/\/$/, '')}/packwiz/pack.toml\nname=${profile.name}\n`;
+  const components = { formatVersion: 1, components: [
+    { uid: 'net.minecraft', version: profile.minecraftVersion, important: true },
+    { uid: 'net.fabricmc.fabric-loader', version: config.fabricLoaderVersion },
+  ] };
+  const tutorial = `DAPEX FABRIC AUTO UPDATE - PRISM LAUNCHER\r\n\r\n1. Import ZIP ini sekali melalui Add Instance -> Import.\r\n2. Login dengan akun Microsoft original.\r\n3. Tekan Play. Sebelum Minecraft terbuka, updater akan menyinkronkan mod dan config dengan server.\r\n4. Masuk ke mc.fahrelgibran.com.\r\n\r\nJangan tambahkan atau mengganti mod Dapex secara manual. Jika update gagal, jangan paksa masuk; kirim isi console Prism ke admin.\r\n`;
+  const zip = new yazl.ZipFile();
+  addBuffer(zip, instance, 'instance.cfg');
+  addBuffer(zip, `${JSON.stringify(components, null, 2)}\n`, 'mmc-pack.json');
+  addBuffer(zip, tutorial, 'TUTORIAL.txt');
+  zip.addFile(bootstrap, 'minecraft/packwiz-installer-bootstrap.jar');
+  await writeZip(zip, autoPackDestination);
 }
 
 async function writeManualPack(profile, destination, loaderVersion, finalizedIndex = null, bundledOverrides = []) {
@@ -350,6 +447,8 @@ export function createProfiles(config) {
     } catch (error) {
       if (!String(error.message).startsWith('Manual installer cannot safely distribute:')) throw error;
     }
+    const packwizDir = path.join(profileDir, 'packwiz', `v${release}`);
+    await writePackwizDistribution(published, packwizDir, path.join(releasesDir, `dapex-fabric-auto-v${release}.zip`), config, materialized.index, materialized.clientOverrides);
     await writeJsonAtomic(activeFile, published);
     await writeJsonAtomic(draftFile, published);
     return published;
@@ -471,5 +570,17 @@ export function createProfiles(config) {
     return destination;
   }
 
-  return { active, draft, addModrinth, removeMod, importUpload, compatibility, publish, setVersion, clientPackFile, manualPackFile };
+  async function autoPackFile(release) {
+    if (!Number.isSafeInteger(release) || release < 1) return null;
+    const destination = path.join(releasesDir, `dapex-fabric-auto-v${release}.zip`);
+    try { await access(destination); return destination; } catch { return null; }
+  }
+
+  async function packwizPackFile(release) {
+    if (!Number.isSafeInteger(release) || release < 1) return null;
+    const destination = path.join(profileDir, 'packwiz', `v${release}`, 'pack.toml');
+    try { await access(destination); return destination; } catch { return null; }
+  }
+
+  return { active, draft, addModrinth, removeMod, importUpload, compatibility, publish, setVersion, clientPackFile, manualPackFile, autoPackFile, packwizPackFile };
 }

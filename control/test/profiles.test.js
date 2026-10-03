@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { access, mkdtemp, readFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import yazl from 'yazl';
@@ -20,6 +20,8 @@ function createZip(file, entries) {
 
 async function fixture() {
   const deployDir = await mkdtemp(path.join(os.tmpdir(), 'dapex-profile-'));
+  const bootstrap = path.join(deployDir, 'packwiz-installer-bootstrap.jar');
+  await writeFile(bootstrap, 'test bootstrap');
   return {
     deployDir,
     profile: createProfiles({
@@ -28,6 +30,8 @@ async function fixture() {
       profileName: 'Dapex Fabric',
       minecraftVersion: '1.21.1',
       fabricLoaderVersion: '0.16.10',
+      playerBaseUrl: 'https://play.example.test',
+      packwizBootstrapFile: bootstrap,
     }),
   };
 }
@@ -52,8 +56,16 @@ test('publishes uploaded Fabric jars into server mods and an importable MRPACK',
   const manualArchive = await inspectZip(manual, new Set(['manual-manifest.json']));
   assert(manualArchive.entries.some((entry) => entry.name === 'mods/example-1.0.0.jar'));
   assert.equal(manualArchive.documents['manual-manifest.json'].bundled[0].path, 'mods/example-1.0.0.jar');
+  const auto = await profile.autoPackFile(1);
+  const autoArchive = await inspectZip(auto);
+  assert(autoArchive.entries.some((entry) => entry.name === 'minecraft/packwiz-installer-bootstrap.jar'));
+  assert.match(await readFile(path.join(deployDir, 'runtime', 'profiles', 'dapex-fabric', 'packwiz', 'v1', 'pack.toml'), 'utf8'), /version = "1"/);
+  assert.match(await readFile(path.join(deployDir, 'runtime', 'profiles', 'dapex-fabric', 'packwiz', 'v1', 'index.toml'), 'utf8'), /metafile = true/);
+  assert(await profile.packwizPackFile(1));
   assert.equal(await profile.clientPackFile(99), null);
   assert.equal(await profile.manualPackFile(99), null);
+  assert.equal(await profile.autoPackFile(99), null);
+  assert.equal(await profile.packwizPackFile(99), null);
 });
 
 test('serializes concurrent uploads so every file remains in the draft', async () => {
@@ -110,6 +122,8 @@ test('blocks a CurseForge pack archive instead of silently publishing an incompl
 
 test('resolves a CurseForge pack into server mods, overrides, and the client MRPACK', async () => {
   const deployDir = await mkdtemp(path.join(os.tmpdir(), 'dapex-profile-'));
+  const bootstrap = path.join(deployDir, 'packwiz-installer-bootstrap.jar');
+  await writeFile(bootstrap, 'test bootstrap');
   const jar = path.join(deployDir, 'curse-mod.jar');
   await createZip(jar, { 'fabric.mod.json': JSON.stringify({ id: 'curse-example', name: 'Curse Example', version: '2.0.0', environment: '*' }) });
   const jarBytes = await readFile(jar);
@@ -120,7 +134,7 @@ test('resolves a CurseForge pack into server mods, overrides, and the client MRP
     return new Response(JSON.stringify({ data: { fileName: 'curse-example.jar', fileLength: jarBytes.length, downloadUrl: 'https://cdn.example/mod.jar', hashes: [{ algo: 1, value: sha1 }] } }), { headers: { 'content-type': 'application/json' } });
   };
   try {
-    const profile = createProfiles({ deployDir, stateDir: path.join(deployDir, 'runtime'), profileName: 'Dapex Fabric', minecraftVersion: '1.21.1', fabricLoaderVersion: '0.16.10', curseForgeApiKey: 'test-key' });
+    const profile = createProfiles({ deployDir, stateDir: path.join(deployDir, 'runtime'), profileName: 'Dapex Fabric', minecraftVersion: '1.21.1', fabricLoaderVersion: '0.16.10', playerBaseUrl: 'https://play.example.test', packwizBootstrapFile: bootstrap, curseForgeApiKey: 'test-key' });
     const upload = path.join(deployDir, 'pack.zip');
     await createZip(upload, {
       'manifest.json': JSON.stringify({ name: 'Example Pack', version: '1', minecraft: { version: '1.21.1', modLoaders: [{ id: 'fabric-0.16.10' }] }, files: [{ projectID: 10, fileID: 20, required: true }], overrides: 'overrides' }),
