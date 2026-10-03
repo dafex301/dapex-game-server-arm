@@ -12,11 +12,13 @@ import { createOrchestrator } from './orchestrator.js';
 import { createProfiles } from './profiles.js';
 import { minecraftWhitelist } from './docker.js';
 import { createManagement } from './management.js';
+import { createFileExplorer } from './file-explorer.js';
 
 const config = loadConfig();
 const orchestrator = createOrchestrator(config);
 const profiles = createProfiles(config);
 const management = createManagement(config);
+const explorer = createFileExplorer(config, management);
 const app = express();
 const uploadDir = path.join(config.stateDir, 'incoming');
 await mkdir(uploadDir, { recursive: true });
@@ -26,7 +28,7 @@ const operations = new Map();
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
-app.use(express.json({ limit: '128kb' }));
+app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(import.meta.dirname, '..', 'public'), { index: false, maxAge: '5m' }));
 
 const asyncRoute = (handler) => (request, response, next) => Promise.resolve(handler(request, response, next)).catch(next);
@@ -36,6 +38,7 @@ const versionSchema = z.object({ version: z.string().regex(/^\d+\.\d+(?:\.\d+)?$
 const switchSchema = z.object({ target: z.enum(['valheim', 'minecraft', 'none']) });
 const whitelistSchema = z.object({ username: z.string().regex(/^[A-Za-z0-9_]{3,16}$/) });
 const worldSchema = z.object({ name: z.string().trim().min(1).max(64), seed: z.string().max(128).optional().default('') });
+const directorySchema = z.object({ path: z.string().min(1).max(512) });
 
 async function requireMinecraftReady() {
   const status = await orchestrator.status();
@@ -46,6 +49,15 @@ async function requireMinecraftReady() {
   }
   if (status.containers.minecraft.health !== 'healthy') {
     const error = new Error('Minecraft is still starting. Wait until it shows healthy, then try the whitelist command again.');
+    error.status = 409;
+    throw error;
+  }
+}
+
+async function requireMinecraftStopped() {
+  const status = await orchestrator.status();
+  if (status.active === 'minecraft') {
+    const error = new Error('Switch Minecraft to Offline before changing files');
     error.status = 409;
     throw error;
   }
@@ -162,6 +174,37 @@ app.post('/api/admin/world/reset', asyncRoute(async (request, response) => {
     throw error;
   }
   response.status(201).json(await management.resetWorld(worldSchema.parse(request.body)));
+}));
+app.get('/api/admin/files', asyncRoute(async (request, response) => response.json(await explorer.list(String(request.query.scope || ''), String(request.query.path || '')))));
+app.get('/api/admin/files/text', asyncRoute(async (request, response) => response.json(await explorer.readText(String(request.query.scope || ''), String(request.query.path || '')))));
+app.get('/api/admin/files/download', asyncRoute(async (request, response) => {
+  const file = await explorer.download(String(request.query.scope || ''), String(request.query.path || ''));
+  response.setHeader('Content-Disposition', `attachment; filename="${file.name.replace(/[\r\n"]/g, '')}"`);
+  response.setHeader('Content-Length', String(file.size));
+  file.stream.pipe(response);
+}));
+app.put('/api/admin/files/text', asyncRoute(async (request, response) => {
+  await requireMinecraftStopped();
+  response.json(await explorer.saveText(String(request.query.scope || ''), String(request.query.path || ''), String(request.body?.content ?? '')));
+}));
+app.post('/api/admin/files/upload', upload.single('file'), asyncRoute(async (request, response) => {
+  await requireMinecraftStopped();
+  if (!request.file) throw new Error('A file is required');
+  try {
+    response.status(201).json(await explorer.upload(String(request.query.scope || ''), String(request.query.path || ''), request.file));
+  } catch (error) {
+    await rm(request.file.path, { force: true });
+    throw error;
+  }
+}));
+app.post('/api/admin/files/directory', asyncRoute(async (request, response) => {
+  await requireMinecraftStopped();
+  const { path: relative } = directorySchema.parse(request.body);
+  response.status(201).json(await explorer.createDirectory(String(request.query.scope || ''), relative));
+}));
+app.delete('/api/admin/files', asyncRoute(async (request, response) => {
+  await requireMinecraftStopped();
+  response.json(await explorer.remove(String(request.query.scope || ''), String(request.query.path || '')));
 }));
 
 app.use((error, request, response, _next) => {

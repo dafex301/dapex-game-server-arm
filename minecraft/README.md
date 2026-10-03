@@ -14,6 +14,12 @@ because a newer release exists.
 4. Back up the Minecraft world before a risky change.
 5. Switch the slot to Minecraft and inspect first-start logs.
 
+The dashboard's **Files** section is for day-to-day Minecraft directories:
+Fabric config, world datapacks, resource packs, logs, crash reports, and a
+read-only world view. Minecraft must be Offline before any write, and every
+write is preceded by a verified local snapshot. Keep mod JARs in Mod Workshop;
+placing them manually would leave the player MRPACK out of sync.
+
 Changing the Minecraft version re-resolves every managed Modrinth project for
 Fabric on that version. If any project has no compatible release, the change
 fails and the previous draft remains. Manual JAR metadata is checked when

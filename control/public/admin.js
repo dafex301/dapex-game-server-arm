@@ -1,4 +1,4 @@
-const state = { payload: null, management: null, busy: false };
+const state = { payload: null, management: null, busy: false, files: { scope: 'config', path: '', listing: null, editing: null } };
 const $ = (selector) => document.querySelector(selector);
 
 async function api(url, options = {}) {
@@ -18,7 +18,8 @@ function toast(message, error = false) {
 
 function modKey(mod) { return `${mod.source}:${mod.projectId || mod.sha256}`; }
 function sideLabel(side) { return typeof side === 'object' && side ? `client:${side.client || '?'} / server:${side.server || '?'}` : String(side || 'unknown'); }
-function bytes(value) { return value >= 1024 ** 3 ? `${(value / 1024 ** 3).toFixed(1)} GiB` : `${(value / 1024 ** 2).toFixed(0)} MiB`; }
+function bytes(value) { return value >= 1024 ** 3 ? `${(value / 1024 ** 3).toFixed(1)} GiB` : value >= 1024 ** 2 ? `${(value / 1024 ** 2).toFixed(1)} MiB` : value >= 1024 ? `${(value / 1024).toFixed(1)} KiB` : `${value} B`; }
+function filePath(name = '') { return [state.files.path, name].filter(Boolean).join('/'); }
 
 function render() {
   const { status, active, draft, compatibility } = state.payload;
@@ -196,6 +197,82 @@ $('#world-reset-form').addEventListener('submit', async (event) => {
   } catch (error) { toast(error.message, true); }
 });
 
+async function refreshFiles() {
+  const { scope, path } = state.files;
+  const listing = await api(`/api/admin/files?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}`);
+  state.files.listing = listing;
+  $('#file-path').textContent = `${scope}:/${path}`;
+  $('#file-scope-note').textContent = `${listing.description}${listing.writable ? ' · writable while Minecraft is offline' : ' · read-only'}`;
+  $('#file-upload-button').disabled = !listing.writable;
+  $('#file-new-folder').disabled = !listing.writable;
+  $('#file-list').innerHTML = listing.entries.length ? listing.entries.map((entry) => {
+    const relative = filePath(entry.name);
+    const download = `/api/admin/files/download?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(relative)}`;
+    return `<div class="file-row"><span class="file-icon">${entry.type === 'directory' ? 'D' : 'F'}</span><button class="file-open" data-file-open="${encodeURIComponent(entry.name)}" data-type="${entry.type}" data-editable="${entry.editable}">${escapeHtml(entry.name)}</button><small>${entry.type === 'file' ? bytes(entry.size) : 'folder'}</small><small>${new Date(entry.modifiedAt).toLocaleString()}</small><span class="file-actions">${entry.type === 'file' ? `<a href="${download}">DOWNLOAD</a>` : ''}${listing.writable ? `<button class="delete" data-file-delete="${encodeURIComponent(entry.name)}">DELETE</button>` : ''}</span></div>`;
+  }).join('') : '<p class="empty">This Minecraft folder is empty.</p>';
+}
+
+$('#file-scope').addEventListener('change', async (event) => {
+  state.files.scope = event.target.value; state.files.path = ''; state.files.editing = null; $('#file-editor').hidden = true;
+  try { await refreshFiles(); } catch (error) { toast(error.message, true); }
+});
+
+$('#file-up').addEventListener('click', async () => {
+  state.files.path = state.files.path.split('/').slice(0, -1).join('/');
+  try { await refreshFiles(); } catch (error) { toast(error.message, true); }
+});
+
+$('#file-list').addEventListener('click', async (event) => {
+  const opener = event.target.closest('[data-file-open]');
+  const remover = event.target.closest('[data-file-delete]');
+  if (opener) {
+    const name = decodeURIComponent(opener.dataset.fileOpen);
+    if (opener.dataset.type === 'directory') { state.files.path = filePath(name); return refreshFiles().catch((error) => toast(error.message, true)); }
+    if (opener.dataset.editable !== 'true') return;
+    try {
+      const relative = filePath(name);
+      const document = await api(`/api/admin/files/text?scope=${encodeURIComponent(state.files.scope)}&path=${encodeURIComponent(relative)}`);
+      state.files.editing = relative; $('#editor-name').textContent = relative; $('#editor-content').value = document.content; $('#editor-save').hidden = !document.writable; $('#file-editor').hidden = false; $('#file-editor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } catch (error) { toast(error.message, true); }
+  }
+  if (remover) {
+    const name = decodeURIComponent(remover.dataset.fileDelete);
+    const relative = filePath(name);
+    if (!confirm(`Backup first, then permanently delete ${relative}?`)) return;
+    try { await api(`/api/admin/files?scope=${encodeURIComponent(state.files.scope)}&path=${encodeURIComponent(relative)}`, { method: 'DELETE' }); await refreshFiles(); toast(`${name} deleted after a verified backup`); }
+    catch (error) { toast(error.message, true); }
+  }
+});
+
+$('#editor-close').addEventListener('click', () => { state.files.editing = null; $('#file-editor').hidden = true; });
+$('#editor-save').addEventListener('click', async () => {
+  if (!state.files.editing || !confirm(`Backup and save ${state.files.editing}?`)) return;
+  try { await api(`/api/admin/files/text?scope=${encodeURIComponent(state.files.scope)}&path=${encodeURIComponent(state.files.editing)}`, { method: 'PUT', body: JSON.stringify({ content: $('#editor-content').value }) }); await refreshFiles(); toast('File saved after a verified backup'); }
+  catch (error) { toast(error.message, true); }
+});
+
+const explorerUpload = $('#explorer-upload');
+$('#file-new-folder').addEventListener('click', async () => {
+  const name = prompt('New folder name (letters, numbers, spaces, dash, underscore):')?.trim();
+  if (!name) return;
+  const relative = filePath(name);
+  try {
+    await api(`/api/admin/files/directory?scope=${encodeURIComponent(state.files.scope)}`, { method: 'POST', body: JSON.stringify({ path: relative }) });
+    await refreshFiles(); toast(`${name} created after a verified backup`);
+  } catch (error) { toast(error.message, true); }
+});
+$('#file-upload-button').addEventListener('click', () => explorerUpload.click());
+explorerUpload.addEventListener('change', async () => {
+  const file = explorerUpload.files[0]; if (!file) return;
+  const form = new FormData(); form.append('file', file);
+  try {
+    const response = await fetch(`/api/admin/files/upload?scope=${encodeURIComponent(state.files.scope)}&path=${encodeURIComponent(state.files.path)}`, { method: 'POST', body: form });
+    const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(body.error || 'Upload failed');
+    await refreshFiles(); toast(`${file.name} uploaded after a verified backup`);
+  } catch (error) { toast(error.message, true); }
+  finally { explorerUpload.value = ''; }
+});
+
 const sections = [...document.querySelectorAll('.section-block')];
 const navLinks = [...document.querySelectorAll('.sidebar nav a')];
 const sectionObserver = new IntersectionObserver((entries) => {
@@ -205,5 +282,5 @@ const sectionObserver = new IntersectionObserver((entries) => {
 }, { rootMargin: '-35% 0px -55%' });
 sections.forEach((section) => sectionObserver.observe(section));
 
-refresh().catch((error) => toast(error.message, true));
+Promise.all([refresh(), refreshFiles()]).catch((error) => toast(error.message, true));
 setInterval(() => refresh().catch(() => {}), 30_000);

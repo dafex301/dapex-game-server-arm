@@ -16,6 +16,8 @@ Cloudflare Access email allowlist. Never publish port 8787 directly.
 - immutable Dapex Fabric release manifests and downloadable MRPACK files.
 - an operations dashboard with bounded local backups, safe server settings,
   disk-reserve reporting, and backup-first world replacement.
+- a Minecraft-only file explorer for curated configuration, datapack, resource
+  pack, world, log, and crash-report areas.
 
 Modrinth mods are downloaded over HTTPS and verified against the recorded
 SHA-512 before being placed in the server profile. Uploaded JARs and packs are
@@ -33,6 +35,14 @@ only allowed while Minecraft is offline; the controller verifies a backup,
 removes the old live world, records the new name/seed, and recreates the
 container so its environment cannot remain stale. Long-term snapshots remain
 encrypted in the separate restic/R2 repository.
+
+The file explorer can browse and download while Minecraft is running. Writing,
+uploading, creating a folder, or deleting requires Minecraft to be offline and
+creates a verified snapshot before the change. Only `config`, the active world's
+`datapacks`, and `resourcepacks` are writable. World data, logs, and crash reports
+are read-only; dotfiles, symlinks, secrets, whitelist/operator data, and
+`server.properties` are hidden and blocked. Mods remain managed by Mod Workshop
+so the server manifest and player MRPACK cannot silently drift apart.
 
 ## Host installation
 
