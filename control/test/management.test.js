@@ -10,10 +10,12 @@ test('exposes bounded backup policy and safely updates approved Minecraft settin
   await mkdir(path.join(root, 'minecraft'), { recursive: true });
   await writeFile(path.join(root, 'minecraft', '.env'), 'MOTD=Old\nRCON_PASSWORD=secret\nMAX_PLAYERS=8\n');
   const management = createManagement({ deployDir: root }, { run: async () => '' });
-  const result = await management.updateSettings({ MOTD: 'New world', MAX_PLAYERS: '12' });
+  const result = await management.updateSettings({ MOTD: 'New world', MAX_PLAYERS: '12', PVP: 'FALSE' });
   assert.equal(result.settings.MOTD, 'New world');
+  assert.equal(result.settings.PVP, 'FALSE');
   assert.equal(result.retention.count, 5);
   await assert.rejects(management.updateSettings({ RCON_PASSWORD: 'leak' }), /not editable/);
+  await assert.rejects(management.updateSettings({ PVP: 'sometimes' }), /must be true or false/);
 });
 
 test('backs up before replacing a world and recreates the container configuration', async () => {
