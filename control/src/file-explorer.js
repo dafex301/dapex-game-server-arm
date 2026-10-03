@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs';
-import { lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open as openFile, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { run } from './process.js';
 
@@ -9,6 +9,16 @@ const safeUploadName = /^[A-Za-z0-9][A-Za-z0-9._ +()[\]-]{0,127}$/;
 
 export function safeRelativePath(value = '') {
   return typeof value === 'string' && !value.startsWith('/') && !value.includes('\\') && !value.includes('\0') && !value.split('/').includes('..');
+}
+
+export function parseMinecraftLogLine(raw) {
+  const match = raw.match(/^\[([^\]]+)] \[([^/]+)\/([A-Z]+)]:\s?(.*)$/);
+  const entry = match ? { timestamp: match[1], thread: match[2], level: match[3].toLowerCase(), message: match[4], raw } : { timestamp: null, thread: null, level: 'info', message: raw, raw };
+  if (/error|fatal/i.test(entry.level) || /exception|failed to|network protocol|crash/i.test(entry.message)) entry.kind = 'error';
+  else if (/warn/i.test(entry.level)) entry.kind = 'warn';
+  else if (/joined the game|lost connection|left the game|logged in/i.test(entry.message)) entry.kind = 'player';
+  else entry.kind = 'info';
+  return entry;
 }
 
 export function createFileExplorer(config, management, dependencies = { run }) {
@@ -133,5 +143,25 @@ export function createFileExplorer(config, management, dependencies = { run }) {
     return { stream: createReadStream(canonical), name: path.basename(canonical), size: details.size };
   }
 
-  return { list, readText, saveText, upload, createDirectory, remove, download };
+  async function latestLog(limit = 250) {
+    const logFile = path.join(dataDir, 'logs', 'latest.log');
+    const details = await stat(logFile).catch((error) => error.code === 'ENOENT' ? null : Promise.reject(error));
+    if (!details) return { source: 'latest.log', modifiedAt: null, entries: [], crashes: [] };
+    const readSize = Math.min(details.size, 512 * 1024);
+    const buffer = Buffer.alloc(readSize);
+    const handle = await openFile(logFile, 'r');
+    try { await handle.read(buffer, 0, readSize, details.size - readSize); } finally { await handle.close(); }
+    let text = buffer.toString('utf8');
+    if (details.size > readSize) text = text.slice(text.indexOf('\n') + 1);
+    const entries = text.split(/\r?\n/).filter(Boolean).slice(-limit).map(parseMinecraftLogLine);
+    const crashDir = path.join(dataDir, 'crash-reports');
+    const crashNames = await readdir(crashDir).catch((error) => error.code === 'ENOENT' ? [] : Promise.reject(error));
+    const crashes = (await Promise.all(crashNames.filter((name) => !name.startsWith('.')).map(async (name) => {
+      const crash = await stat(path.join(crashDir, name));
+      return crash.isFile() ? { name, modifiedAt: crash.mtime.toISOString(), size: crash.size } : null;
+    }))).filter(Boolean).sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt)).slice(0, 5);
+    return { source: 'latest.log', modifiedAt: details.mtime.toISOString(), entries, crashes };
+  }
+
+  return { list, readText, saveText, upload, createDirectory, remove, download, latestLog };
 }

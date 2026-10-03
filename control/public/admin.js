@@ -1,4 +1,4 @@
-const state = { payload: null, management: null, busy: false, files: { scope: 'config', path: '', listing: null, editing: null } };
+const state = { payload: null, management: null, busy: false, files: { scope: 'config', path: '', listing: null, editing: null }, logs: { payload: null, filter: 'all', follow: true, busy: false } };
 const $ = (selector) => document.querySelector(selector);
 
 async function api(url, options = {}) {
@@ -77,6 +77,29 @@ function escapeHtml(value) {
 async function refresh() {
   [state.payload, state.management] = await Promise.all([api('/api/admin/status'), api('/api/admin/management')]);
   render();
+}
+
+function renderLogs() {
+  const payload = state.logs.payload;
+  if (!payload) return;
+  const counts = payload.entries.reduce((result, entry) => ({ ...result, [entry.kind]: (result[entry.kind] || 0) + 1 }), {});
+  $('#log-error-count').innerHTML = `<b>${counts.error || 0}</b> errors`;
+  $('#log-warn-count').innerHTML = `<b>${counts.warn || 0}</b> warnings`;
+  $('#log-player-count').innerHTML = `<b>${counts.player || 0}</b> player events`;
+  $('#log-updated').textContent = payload.modifiedAt ? `updated ${new Date(payload.modifiedAt).toLocaleTimeString()}` : 'waiting for server output';
+  $('#crash-summary').innerHTML = payload.crashes.length ? payload.crashes.map((crash) => `<a href="/api/admin/files/download?scope=crashes&path=${encodeURIComponent(crash.name)}" title="Download crash report">⚠ ${escapeHtml(crash.name)}</a>`).join('') : '<span>✓ No crash reports</span>';
+  const entries = payload.entries.filter((entry) => state.logs.filter === 'all' || entry.kind === state.logs.filter || (state.logs.filter === 'issues' && ['warn', 'error'].includes(entry.kind)));
+  $('#log-lines').innerHTML = entries.length ? entries.map((entry) => `<div class="log-line ${entry.kind}"><time>${escapeHtml(entry.timestamp || '··:··:··')}</time><span class="log-level">${escapeHtml(entry.level)}</span><code>${escapeHtml(entry.message)}</code></div>`).join('') : '<div class="log-zero">No matching log entries.</div>';
+  $('#log-visible-count').textContent = `${entries.length} / ${payload.entries.length} lines`;
+  if (state.logs.follow) $('#log-lines').scrollTop = $('#log-lines').scrollHeight;
+}
+
+async function refreshLatestLog() {
+  if (state.logs.busy) return;
+  state.logs.busy = true;
+  try { state.logs.payload = await api('/api/admin/logs/latest?lines=500'); renderLogs(); }
+  catch (error) { $('#log-lines').innerHTML = `<div class="log-zero error">${escapeHtml(error.message)}</div>`; throw error; }
+  finally { state.logs.busy = false; }
 }
 
 async function waitForOperation(id) {
@@ -311,6 +334,15 @@ for (const eventName of ['dragenter', 'dragover']) dropSurface.addEventListener(
 for (const eventName of ['dragleave', 'drop']) dropSurface.addEventListener(eventName, (event) => { event.preventDefault(); dropSurface.classList.remove('dragging'); });
 dropSurface.addEventListener('drop', (event) => uploadExplorerFile(event.dataTransfer.files[0]));
 
+$('#log-filter').addEventListener('change', (event) => { state.logs.filter = event.target.value; renderLogs(); });
+$('#log-refresh').addEventListener('click', () => refreshLatestLog().catch((error) => toast(error.message, true)));
+$('#log-follow').addEventListener('click', (event) => {
+  state.logs.follow = !state.logs.follow;
+  event.currentTarget.classList.toggle('active', state.logs.follow);
+  event.currentTarget.textContent = state.logs.follow ? '● Live' : '○ Paused';
+  if (state.logs.follow) refreshLatestLog().catch((error) => toast(error.message, true));
+});
+
 const sections = [...document.querySelectorAll('.section-block')];
 const navLinks = [...document.querySelectorAll('.sidebar nav a')];
 const sectionObserver = new IntersectionObserver((entries) => {
@@ -320,5 +352,6 @@ const sectionObserver = new IntersectionObserver((entries) => {
 }, { rootMargin: '-35% 0px -55%' });
 sections.forEach((section) => sectionObserver.observe(section));
 
-Promise.allSettled([refresh(), refreshFiles()]).then((results) => results.filter((result) => result.status === 'rejected').forEach((result) => toast(result.reason.message, true)));
+Promise.allSettled([refresh(), refreshFiles(), refreshLatestLog()]).then((results) => results.filter((result) => result.status === 'rejected').forEach((result) => toast(result.reason.message, true)));
 setInterval(() => refresh().catch(() => {}), 30_000);
+setInterval(() => { if (state.logs.follow) refreshLatestLog().catch(() => {}); }, 5_000);

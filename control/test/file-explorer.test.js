@@ -3,13 +3,19 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createFileExplorer, safeRelativePath } from '../src/file-explorer.js';
+import { createFileExplorer, parseMinecraftLogLine, safeRelativePath } from '../src/file-explorer.js';
 
 test('rejects paths outside Minecraft file areas', () => {
   assert.equal(safeRelativePath('spark/config.json'), true);
   assert.equal(safeRelativePath('../.env'), false);
   assert.equal(safeRelativePath('/etc/passwd'), false);
   assert.equal(safeRelativePath('windows\\system.ini'), false);
+});
+
+test('classifies Minecraft log severity and player lifecycle lines', () => {
+  assert.equal(parseMinecraftLogLine('[16:01:28] [Server thread/INFO]: Dadiink lost connection: Disconnected').kind, 'player');
+  assert.equal(parseMinecraftLogLine('[15:58:11] [main/WARN]: Invalid option ignored').kind, 'warn');
+  assert.equal(parseMinecraftLogLine('[15:58:11] [main/ERROR]: Failed to decode packet').kind, 'error');
 });
 
 test('lists curated files while hiding secrets and symlink-like special names', async () => {

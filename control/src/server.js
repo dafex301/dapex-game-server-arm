@@ -39,6 +39,7 @@ const switchSchema = z.object({ target: z.enum(['valheim', 'minecraft', 'none'])
 const whitelistSchema = z.object({ username: z.string().regex(/^[A-Za-z0-9_]{3,16}$/) });
 const worldSchema = z.object({ name: z.string().trim().min(1).max(64), seed: z.string().max(128).optional().default('') });
 const directorySchema = z.object({ path: z.string().min(1).max(512) });
+const logQuerySchema = z.object({ lines: z.coerce.number().int().min(50).max(500).default(250) });
 
 async function requireMinecraftReady() {
   const status = await orchestrator.status();
@@ -156,6 +157,10 @@ app.delete('/api/admin/minecraft/whitelist', asyncRoute(async (request, response
 }));
 
 app.get('/api/admin/management', asyncRoute(async (_request, response) => response.json(await management.overview())));
+app.get('/api/admin/logs/latest', asyncRoute(async (request, response) => {
+  const { lines } = logQuerySchema.parse(request.query);
+  response.json(await explorer.latestLog(lines));
+}));
 app.post('/api/admin/backups', asyncRoute(async (_request, response) => response.status(201).json(await management.backup())));
 app.patch('/api/admin/minecraft/settings', asyncRoute(async (request, response) => {
   const status = await orchestrator.status();
