@@ -2,7 +2,7 @@
 
 The control service is a Node 20 application bound to `127.0.0.1:8787`. It is
 designed to be reached only through a Cloudflare Tunnel and protected with a
-Cloudflare Access email allowlist. Never publish port 8787 directly.
+Cloudflare Access policy. Never publish port 8787 directly.
 
 ## What it owns
 
@@ -54,8 +54,8 @@ cp minecraft/.env.example minecraft/.env
 chmod 600 control/.env minecraft/.env
 ```
 
-Required values include `CONTROL_ALLOWED_EMAILS`, `CURSEFORGE_API_KEY`, a long random
-`CONTROL_INTERNAL_TOKEN` shared with the Discord bot, and a long random Minecraft
+Required values include `CURSEFORGE_API_KEY`, a long random `CONTROL_INTERNAL_TOKEN`
+shared with the Discord bot, and a long random Minecraft
 RCON password. `GAME_DEPLOY_DIR` must match the checkout location. Then run:
 
 ```sh
@@ -77,7 +77,8 @@ sudo systemctl status dapex-game-control dapex-game-reconcile
 ## Cloudflare and network layout
 
 - `server.fahrelgibran.com` -> Tunnel -> `http://127.0.0.1:8787`, protected by
-  Cloudflare Access and the configured exact email allowlist.
+  Cloudflare Access. Anyone admitted by its policy can use the dashboard; membership
+  is managed only in Cloudflare rather than duplicated in application configuration.
 - `play.fahrelgibran.com` -> the same Tunnel origin, public player page.
 - `mc.fahrelgibran.com` -> DNS-only A/AAAA record to the VM public address.
 

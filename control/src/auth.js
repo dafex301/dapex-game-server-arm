@@ -21,7 +21,7 @@ export function createAuth(config) {
       return;
     }
     const email = request.get('cf-access-authenticated-user-email')?.trim().toLowerCase();
-    if (email && config.allowedEmails.has(email)) {
+    if (email) {
       request.actor = email;
       next();
       return;

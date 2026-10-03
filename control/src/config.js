@@ -26,7 +26,6 @@ export function loadConfig() {
     baseUrl: process.env.CONTROL_BASE_URL?.trim() || 'https://server.fahrelgibran.com',
     playerBaseUrl: process.env.PLAYER_BASE_URL?.trim() || 'https://play.fahrelgibran.com',
     minecraftAddress: process.env.MINECRAFT_ADDRESS?.trim() || 'mc.fahrelgibran.com',
-    allowedEmails: new Set((process.env.CONTROL_ALLOWED_EMAILS || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean)),
     internalToken: process.env.CONTROL_INTERNAL_TOKEN?.trim() || null,
     authDisabled: boolean('CONTROL_AUTH_DISABLED'),
     deployDir,

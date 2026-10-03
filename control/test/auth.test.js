@@ -10,13 +10,18 @@ function invoke(headers, config) {
   });
 }
 
-test('allows configured Cloudflare Access identities', async () => {
-  const result = await invoke({ 'cf-access-authenticated-user-email': 'Admin@Example.com' }, { authDisabled: false, internalToken: null, allowedEmails: new Set(['admin@example.com']) });
-  assert.deepEqual(result, { status: 200, actor: 'admin@example.com' });
+test('allows any identity authenticated by Cloudflare Access', async () => {
+  const result = await invoke({ 'cf-access-authenticated-user-email': 'Friend@Example.com' }, { authDisabled: false, internalToken: null });
+  assert.deepEqual(result, { status: 200, actor: 'friend@example.com' });
 });
 
-test('rejects unlisted identities and accepts internal bearer token', async () => {
-  const config = { authDisabled: false, internalToken: 'secret', allowedEmails: new Set(['admin@example.com']) };
-  assert.equal((await invoke({ 'cf-access-authenticated-user-email': 'other@example.com' }, config)).status, 401);
+test('rejects requests without a Cloudflare identity and accepts internal bearer token', async () => {
+  const config = { authDisabled: false, internalToken: 'secret' };
+  assert.equal((await invoke({}, config)).status, 401);
   assert.equal((await invoke({ authorization: 'Bearer secret' }, config)).actor, 'internal-service');
+});
+
+test('normalizes authenticated Cloudflare identity for the audit actor', async () => {
+  const result = await invoke({ 'cf-access-authenticated-user-email': 'Admin@Example.com' }, { authDisabled: false, internalToken: null });
+  assert.deepEqual(result, { status: 200, actor: 'admin@example.com' });
 });
