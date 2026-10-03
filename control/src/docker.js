@@ -38,6 +38,10 @@ export async function startContainer(name) {
   await run('docker', ['start', name], { timeout: 180_000 });
 }
 
+export async function removeContainer(name) {
+  await run('docker', ['rm', name], { timeout: 180_000 });
+}
+
 export async function containerLogs(name, since = null) {
   const args = ['logs', '--tail', '500'];
   if (since) args.push('--since', since);

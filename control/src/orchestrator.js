@@ -1,11 +1,11 @@
 import path from 'node:path';
-import { inspectContainer, containerLogs, containerStats, startContainer, stopContainer } from './docker.js';
+import { inspectContainer, containerLogs, containerStats, removeContainer, startContainer, stopContainer } from './docker.js';
 import { readJson, writeJsonAtomic } from './files.js';
 import { run } from './process.js';
 
 const games = new Set(['valheim', 'minecraft', 'none']);
 
-const defaultDependencies = { inspectContainer, containerLogs, containerStats, startContainer, stopContainer, run };
+const defaultDependencies = { inspectContainer, containerLogs, containerStats, removeContainer, startContainer, stopContainer, run };
 
 export function createOrchestrator(config, dependencies = defaultDependencies) {
   const stateFile = path.join(config.stateDir, 'game-slot.json');
@@ -83,7 +83,10 @@ export function createOrchestrator(config, dependencies = defaultDependencies) {
       if (active !== 'none') await dependencies.stopContainer(containers[active]);
       if (target !== 'none') {
         const targetState = await dependencies.inspectContainer(containers[target]);
-        if (targetState.exists) await dependencies.startContainer(containers[target]);
+        if (target === 'minecraft' && targetState.exists) {
+          await dependencies.removeContainer(containers[target]);
+          await createMissingContainer(target);
+        } else if (targetState.exists) await dependencies.startContainer(containers[target]);
         else await createMissingContainer(target);
         await waitUntilRunning(target);
       }

@@ -18,7 +18,12 @@ function fixture() {
       containerLogs: async (name) => name === 'valheim' ? 'Session with join code 123456 is active' : 'Done (4.2s)!',
       stopContainer: async (name) => { containers[name].running = false; },
       startContainer: async (name) => { containers[name].running = true; },
-      run: async () => { throw new Error('unexpected process call'); },
+      removeContainer: async (name) => { containers[name] = { name, exists: false, running: false, health: null }; },
+      run: async (command) => {
+        const name = command.endsWith('start-minecraft.sh') ? 'minecraft' : null;
+        if (!name) throw new Error('unexpected process call');
+        containers[name] = { name, exists: true, running: true, health: null };
+      },
     },
   };
 }
@@ -45,10 +50,7 @@ test('refuses to operate if both games are already running', async () => {
 test('restores the previous game when the target fails', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'dapex-orchestrator-'));
   const { containers, dependencies } = fixture();
-  dependencies.startContainer = async (name) => {
-    if (name === 'minecraft') throw new Error('boot failed');
-    containers[name].running = true;
-  };
+  dependencies.run = async () => { throw new Error('boot failed'); };
   const orchestrator = createOrchestrator({ stateDir: directory, deployDir: directory, valheimContainer: 'valheim', minecraftContainer: 'minecraft' }, dependencies);
   await assert.rejects(orchestrator.switchUnlocked('minecraft', 'test'), /boot failed/);
   assert.equal(containers.valheim.running, true);
