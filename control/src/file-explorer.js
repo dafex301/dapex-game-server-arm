@@ -14,7 +14,7 @@ export function safeRelativePath(value = '') {
 export function parseMinecraftLogLine(raw) {
   const match = raw.match(/^\[([^\]]+)] \[([^/]+)\/([A-Z]+)]:\s?(.*)$/);
   const entry = match ? { timestamp: match[1], thread: match[2], level: match[3].toLowerCase(), message: match[4], raw } : { timestamp: null, thread: null, level: 'info', message: raw, raw };
-  if (/error|fatal/i.test(entry.level) || /exception|failed to|network protocol|crash/i.test(entry.message)) entry.kind = 'error';
+  if (/error|fatal/i.test(entry.level) || /exception|failed to|network protocol|\bcrash(?:ed|ing)?\b(?!-report)/i.test(entry.message)) entry.kind = 'error';
   else if (/warn/i.test(entry.level)) entry.kind = 'warn';
   else if (/joined the game|lost connection|left the game|logged in/i.test(entry.message)) entry.kind = 'player';
   else entry.kind = 'info';

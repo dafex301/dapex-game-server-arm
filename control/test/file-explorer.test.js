@@ -16,6 +16,7 @@ test('classifies Minecraft log severity and player lifecycle lines', () => {
   assert.equal(parseMinecraftLogLine('[16:01:28] [Server thread/INFO]: Dadiink lost connection: Disconnected').kind, 'player');
   assert.equal(parseMinecraftLogLine('[15:58:11] [main/WARN]: Invalid option ignored').kind, 'warn');
   assert.equal(parseMinecraftLogLine('[15:58:11] [main/ERROR]: Failed to decode packet').kind, 'error');
+  assert.equal(parseMinecraftLogLine('   |-- fabric-crash-report-info-v1 0.2.29').kind, 'info');
 });
 
 test('lists curated files while hiding secrets and symlink-like special names', async () => {
