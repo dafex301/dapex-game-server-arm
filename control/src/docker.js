@@ -45,8 +45,17 @@ export async function containerLogs(name, since = null) {
   return runOptional('docker', args, { allowedExitCodes: [1], timeout: 30_000, maxBuffer: 8 * 1024 * 1024 });
 }
 
-export async function minecraftWhitelist(container, action = 'list', username = null) {
+export async function minecraftWhitelist(container, action = 'list', username = null, runCommand = run) {
   const args = ['exec', container, 'rcon-cli', 'whitelist', action];
   if (username) args.push(username);
-  return run('docker', args, { timeout: 30_000 });
+  try {
+    return await runCommand('docker', args, { timeout: 30_000 });
+  } catch (error) {
+    if (/failed to connect to rcon|connect(?:ion)? refused/i.test(error.message || '')) {
+      const readinessError = new Error('Minecraft is still starting. Wait until it shows healthy, then try the whitelist command again.');
+      readinessError.status = 409;
+      throw readinessError;
+    }
+    throw error;
+  }
 }

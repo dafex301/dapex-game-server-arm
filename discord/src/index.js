@@ -245,11 +245,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.reply({ content: 'This command requires the configured game admin role.', flags: MessageFlags.Ephemeral });
         return;
       }
-      const remaining = claimCooldown(`minecraft-${subcommand}`);
-      if (remaining) {
-        await interaction.reply({ content: `That command is cooling down. Try again in ${remaining}s.`, flags: MessageFlags.Ephemeral });
-        return;
-      }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const action = subcommand.replace('whitelist-', '');
       const username = action === 'list' ? null : interaction.options.getString('username', true);

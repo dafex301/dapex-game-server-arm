@@ -41,6 +41,11 @@ async function requireMinecraftReady() {
     error.status = 409;
     throw error;
   }
+  if (status.containers.minecraft.health !== 'healthy') {
+    const error = new Error('Minecraft is still starting. Wait until it shows healthy, then try the whitelist command again.');
+    error.status = 409;
+    throw error;
+  }
 }
 
 app.get('/', (request, response) => {
