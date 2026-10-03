@@ -130,7 +130,8 @@ app.delete('/api/admin/mods/:key', asyncRoute(async (request, response) => respo
 app.post('/api/admin/upload', upload.single('file'), asyncRoute(async (request, response) => {
   if (!request.file) throw new Error('A file is required');
   try {
-    response.status(201).json(await profiles.importUpload(request.file.path, request.file.originalname, request.actor));
+    const onConflict = request.query.onConflict === 'replace' ? 'replace' : 'reject';
+    response.status(201).json(await profiles.importUpload(request.file.path, request.file.originalname, request.actor, onConflict));
   } catch (error) {
     await rm(request.file.path, { force: true });
     throw error;
@@ -230,7 +231,7 @@ app.use((error, request, response, _next) => {
     response.status(413).json({ error: `Upload exceeds ${config.maxUploadBytes / 1024 / 1024} MiB` });
     return;
   }
-  response.status(error.status || 500).json({ error: error.message || 'Unexpected control service error' });
+  response.status(error.status || 500).json({ error: error.message || 'Unexpected control service error', ...(error.code ? { code: error.code } : {}), ...(error.conflict ? { conflict: error.conflict } : {}) });
 });
 
 const server = app.listen(config.port, config.host, () => {

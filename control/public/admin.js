@@ -1,4 +1,5 @@
 const state = { payload: null, management: null, busy: false, files: { scope: 'config', path: '', listing: null, editing: null }, logs: { payload: null, filter: 'all', follow: true, busy: false } };
+let whitelistLoaded = false;
 const $ = (selector) => document.querySelector(selector);
 
 async function api(url, options = {}) {
@@ -50,8 +51,13 @@ function render() {
       <div><strong>${escapeHtml(mod.name)}</strong><small>${escapeHtml(mod.version || 'unresolved')} · ${escapeHtml(sideLabel(mod.side))}</small></div>
       <button data-remove="${encodeURIComponent(modKey(mod))}" aria-label="Remove ${escapeHtml(mod.name)}">REMOVE</button>
     </article>`).join('') : '<div class="empty-manifest">No mods staged yet. Fabric itself will still boot.</div>';
-  if (status.active === 'minecraft') refreshWhitelist();
-  else $('#whitelist-output').textContent = 'Start Minecraft to manage the whitelist.';
+  if (status.active === 'minecraft' && !whitelistLoaded) {
+    whitelistLoaded = true;
+    refreshWhitelist();
+  } else if (status.active !== 'minecraft') {
+    whitelistLoaded = false;
+    $('#whitelist-output').textContent = 'Start Minecraft to manage the whitelist.';
+  }
 
   const management = state.management;
   if (management) {
@@ -155,6 +161,7 @@ const uploadQueue = [];
 let activeUploads = 0;
 let uploadSequence = 0;
 const uploadConcurrency = 2;
+let conflictDialogs = Promise.resolve();
 $('#browse-button').addEventListener('click', () => fileInput.click());
 $('#drop-zone').addEventListener('dragover', (event) => { event.preventDefault(); event.currentTarget.classList.add('dragging'); });
 $('#drop-zone').addEventListener('dragleave', (event) => event.currentTarget.classList.remove('dragging'));
@@ -193,12 +200,12 @@ function renderUploadQueue() {
   </article>`).join('');
 }
 
-function uploadQueuedFile(item) {
+function uploadQueuedFile(item, onConflict = 'reject') {
   return new Promise((resolve, reject) => {
     const form = new FormData();
     form.append('file', item.file);
     const request = new XMLHttpRequest();
-    request.open('POST', '/api/admin/upload');
+    request.open('POST', `/api/admin/upload${onConflict === 'replace' ? '?onConflict=replace' : ''}`);
     request.upload.addEventListener('progress', (event) => {
       if (!event.lengthComputable) return;
       item.progress = Math.round((event.loaded / event.total) * 100);
@@ -208,11 +215,37 @@ function uploadQueuedFile(item) {
       let body = {};
       try { body = JSON.parse(request.responseText || '{}'); } catch {}
       if (request.status >= 200 && request.status < 300) resolve(body);
-      else reject(new Error(body.error || `Upload failed (${request.status})`));
+      else {
+        const error = new Error(body.error || `Upload failed (${request.status})`);
+        error.code = body.code; error.conflict = body.conflict;
+        reject(error);
+      }
     });
     request.addEventListener('error', () => reject(new Error('Network error while uploading')));
     request.send(form);
   });
+}
+
+function showConflictDialog(conflict) {
+  const dialog = $('#mod-conflict-dialog');
+  $('#conflict-mod-name').textContent = conflict.incoming.name;
+  $('#conflict-existing-version').textContent = conflict.existing.version;
+  $('#conflict-existing-source').textContent = conflict.existing.source;
+  $('#conflict-incoming-version').textContent = conflict.incoming.version;
+  $('#conflict-incoming-source').textContent = conflict.incoming.originalName;
+  return new Promise((resolve) => {
+    const finish = (choice) => { dialog.close(); resolve(choice); };
+    $('#conflict-keep').onclick = () => finish('keep');
+    $('#conflict-replace').onclick = () => finish('replace');
+    dialog.oncancel = (event) => { event.preventDefault(); finish('keep'); };
+    dialog.showModal();
+  });
+}
+
+function askConflict(conflict) {
+  const result = conflictDialogs.then(() => showConflictDialog(conflict));
+  conflictDialogs = result.catch(() => {});
+  return result;
 }
 
 function pumpUploadQueue() {
@@ -222,9 +255,26 @@ function pumpUploadQueue() {
     activeUploads += 1;
     item.status = 'uploading';
     renderUploadQueue();
-    uploadQueuedFile(item).then(() => {
+    uploadQueuedFile(item).then((result) => {
       item.status = 'complete'; item.progress = 100;
-    }).catch((error) => {
+      if (result.upload?.action === 'ignored') item.error = 'Already staged · duplicate ignored';
+    }).catch(async (error) => {
+      if (error.code === 'MOD_VERSION_CONFLICT' && error.conflict) {
+        const choice = await askConflict(error.conflict);
+        if (choice === 'keep') {
+          item.status = 'complete'; item.progress = 100; item.error = `Kept staged version ${error.conflict.existing.version}`;
+          return;
+        }
+        item.status = 'uploading'; item.progress = 0; item.error = '';
+        renderUploadQueue();
+        try {
+          await uploadQueuedFile(item, 'replace');
+          item.status = 'complete'; item.progress = 100; item.error = `Replaced ${error.conflict.existing.version} with ${error.conflict.incoming.version}`;
+        } catch (replacementError) {
+          item.status = 'error'; item.error = replacementError.message || 'Replacement upload failed';
+        }
+        return;
+      }
       item.status = 'error'; item.error = error.message || 'Upload failed';
     }).finally(async () => {
       activeUploads -= 1;

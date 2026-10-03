@@ -60,6 +60,28 @@ function primaryFile(mod) {
   return mod.files?.find((file) => file.primary) || mod.files?.[0];
 }
 
+function modIdentity(mod) {
+  return mod.kind === 'fabric-mod' ? mod.metadata?.id : mod.source === 'modrinth' ? mod.slug : null;
+}
+
+function collapseExactDuplicates(profile) {
+  const kept = new Map();
+  const result = [];
+  for (const mod of profile.mods) {
+    const identity = modIdentity(mod);
+    const key = identity ? `${identity}:${mod.version}` : null;
+    if (!key || !kept.has(key)) {
+      result.push(mod);
+      if (key) kept.set(key, result.length - 1);
+      continue;
+    }
+    const index = kept.get(key);
+    if (mod.source === 'modrinth' && result[index].source !== 'modrinth') result[index] = mod;
+  }
+  profile.mods = result;
+  return profile;
+}
+
 function addBuffer(zip, value, name) {
   zip.addBuffer(Buffer.isBuffer(value) ? value : Buffer.from(value), name);
 }
@@ -129,6 +151,7 @@ export function createProfiles(config) {
   }
 
   async function saveDraft(value) {
+    collapseExactDuplicates(value);
     value.updatedAt = new Date().toISOString();
     await writeJsonAtomic(draftFile, value);
     return value;
@@ -172,7 +195,7 @@ export function createProfiles(config) {
     return saveDraft(current);
   }
 
-  async function importUploadUnlocked(file, originalName, actor) {
+  async function importUploadUnlocked(file, originalName, actor, onConflict = 'reject') {
     const extension = path.extname(originalName).toLowerCase();
     if (!allowedExtensions.has(extension)) throw new Error('Only .jar, .mrpack, and .zip uploads are accepted');
     if (!(await hasZipMagic(file))) throw new Error('Uploaded file is not a valid ZIP/JAR archive');
@@ -200,8 +223,8 @@ export function createProfiles(config) {
     }
 
     const current = await draft();
-    if (current.mods.some((mod) => mod.sha256 === sha256)) return current;
-    current.mods.push({
+    if (current.mods.some((mod) => mod.sha256 === sha256)) return { profile: current, upload: { action: 'ignored', reason: 'same-file' } };
+    const incoming = {
       source: 'upload',
       projectId: metadata.id || null,
       sha256,
@@ -214,12 +237,32 @@ export function createProfiles(config) {
       metadata,
       addedBy: safeActor(actor),
       addedAt: new Date().toISOString(),
-    });
-    return saveDraft(current);
+    };
+    if (kind === 'fabric-mod' && metadata.id) {
+      const duplicate = current.mods.find((mod) => (mod.metadata?.id || mod.slug || mod.projectId) === metadata.id);
+      if (duplicate && String(duplicate.version) === String(incoming.version)) {
+        return { profile: current, upload: { action: 'ignored', reason: 'same-version', existing: { name: duplicate.name, version: duplicate.version, source: duplicate.source } } };
+      }
+      if (duplicate && onConflict !== 'replace') {
+        const error = new Error(`${metadata.name} ${metadata.version} conflicts with staged version ${duplicate.version}`);
+        error.status = 409;
+        error.code = 'MOD_VERSION_CONFLICT';
+        error.conflict = {
+          id: metadata.id,
+          existing: { name: duplicate.name, version: duplicate.version, source: duplicate.source },
+          incoming: { name: incoming.name, version: incoming.version, source: incoming.source, originalName },
+        };
+        throw error;
+      }
+      if (duplicate) current.mods = current.mods.filter((mod) => mod !== duplicate);
+    }
+    current.mods.push(incoming);
+    const saved = await saveDraft(current);
+    return { profile: saved, upload: { action: 'staged', replaced: kind === 'fabric-mod' ? metadata.id : null } };
   }
 
-  async function importUpload(file, originalName, actor) {
-    const result = uploadMutation.then(() => importUploadUnlocked(file, originalName, actor));
+  async function importUpload(file, originalName, actor, onConflict = 'reject') {
+    const result = uploadMutation.then(() => importUploadUnlocked(file, originalName, actor, onConflict));
     uploadMutation = result.catch(() => {});
     return result;
   }
@@ -228,6 +271,17 @@ export function createProfiles(config) {
     const issues = [];
     const modrinthProjects = new Set(profile.mods.filter((mod) => mod.source === 'modrinth').map((mod) => mod.projectId));
     const modrinthVersions = new Set(profile.mods.filter((mod) => mod.source === 'modrinth').map((mod) => mod.versionId));
+    const versionsByIdentity = new Map();
+    for (const mod of profile.mods) {
+      const identity = modIdentity(mod);
+      if (!identity) continue;
+      const versions = versionsByIdentity.get(identity) || new Set();
+      versions.add(String(mod.version));
+      versionsByIdentity.set(identity, versions);
+    }
+    for (const [identity, versions] of versionsByIdentity) {
+      if (versions.size > 1) issues.push({ level: 'block', mod: identity, message: `Multiple versions staged: ${[...versions].join(', ')}` });
+    }
     for (const mod of profile.mods) {
       if (mod.kind === 'unknown-archive') issues.push({ level: 'block', mod: mod.name, message: 'Archive type could not be identified' });
       if (mod.kind === 'curseforge-pack') {

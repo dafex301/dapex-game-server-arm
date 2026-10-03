@@ -68,6 +68,24 @@ test('serializes concurrent uploads so every file remains in the draft', async (
   assert.deepEqual(draft.mods.map((mod) => mod.name).sort(), ['First', 'Second']);
 });
 
+test('ignores an exact mod version duplicate and requires a decision for version conflicts', async () => {
+  const { deployDir, profile } = await fixture();
+  const first = path.join(deployDir, 'example-v1.jar');
+  const duplicate = path.join(deployDir, 'example-v1-repacked.jar');
+  const upgrade = path.join(deployDir, 'example-v2.jar');
+  await createZip(first, { 'fabric.mod.json': JSON.stringify({ id: 'example', name: 'Example', version: '1.0.0', environment: '*' }) });
+  await createZip(duplicate, { 'fabric.mod.json': JSON.stringify({ id: 'example', name: 'Example Repacked', version: '1.0.0', environment: '*' }), 'extra.txt': 'different archive' });
+  await createZip(upgrade, { 'fabric.mod.json': JSON.stringify({ id: 'example', name: 'Example', version: '2.0.0', environment: '*' }) });
+  await profile.importUpload(first, 'example-v1.jar', 'test@example.com');
+  const ignored = await profile.importUpload(duplicate, 'example-v1-repacked.jar', 'test@example.com');
+  assert.equal(ignored.upload.action, 'ignored');
+  await assert.rejects(profile.importUpload(upgrade, 'example-v2.jar', 'test@example.com'), (error) => error.code === 'MOD_VERSION_CONFLICT' && error.conflict.existing.version === '1.0.0');
+  const replacement = path.join(deployDir, 'example-v2-retry.jar');
+  await createZip(replacement, { 'fabric.mod.json': JSON.stringify({ id: 'example', name: 'Example', version: '2.0.0', environment: '*' }) });
+  await profile.importUpload(replacement, 'example-v2.jar', 'test@example.com', 'replace');
+  assert.deepEqual((await profile.draft()).mods.map((mod) => mod.version), ['2.0.0']);
+});
+
 test('blocks a CurseForge pack archive instead of silently publishing an incomplete release', async () => {
   const { deployDir, profile } = await fixture();
   const upload = path.join(deployDir, 'pack.zip');

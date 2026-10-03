@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createFileExplorer, parseMinecraftLogLine, safeRelativePath } from '../src/file-explorer.js';
+import { createFileExplorer, isRoutineRconLine, parseMinecraftLogLine, safeRelativePath } from '../src/file-explorer.js';
 
 test('rejects paths outside Minecraft file areas', () => {
   assert.equal(safeRelativePath('spark/config.json'), true);
@@ -17,6 +17,12 @@ test('classifies Minecraft log severity and player lifecycle lines', () => {
   assert.equal(parseMinecraftLogLine('[15:58:11] [main/WARN]: Invalid option ignored').kind, 'warn');
   assert.equal(parseMinecraftLogLine('[15:58:11] [main/ERROR]: Failed to decode packet').kind, 'error');
   assert.equal(parseMinecraftLogLine('   |-- fabric-crash-report-info-v1 0.2.29').kind, 'info');
+});
+
+test('hides routine local RCON lifecycle noise without hiding RCON failures', () => {
+  assert.equal(isRoutineRconLine('[17:02:37] [RCON Listener #1/INFO]: Thread RCON Client /0:0:0:0:0:0:0:1 started'), true);
+  assert.equal(isRoutineRconLine('[17:02:37] [RCON Client /0:0:0:0:0:0:0:1 #63/INFO]: Thread RCON Client /0:0:0:0:0:0:0:1 shutting down'), true);
+  assert.equal(isRoutineRconLine('[17:02:37] [Server thread/ERROR]: RCON failed to bind'), false);
 });
 
 test('lists curated files while hiding secrets and symlink-like special names', async () => {

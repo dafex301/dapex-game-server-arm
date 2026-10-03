@@ -21,6 +21,11 @@ export function parseMinecraftLogLine(raw) {
   return entry;
 }
 
+export function isRoutineRconLine(raw) {
+  return /\[RCON Listener #[^\]]+\/INFO]: Thread RCON Client \/0:0:0:0:0:0:0:1 started$/.test(raw)
+    || /\[RCON Client \/0:0:0:0:0:0:0:1 #[^\]]+\/INFO]: Thread RCON Client \/0:0:0:0:0:0:0:1 shutting down$/.test(raw);
+}
+
 export function createFileExplorer(config, management, dependencies = { run }) {
   const dataDir = path.join(config.deployDir, 'minecraft', 'data');
 
@@ -153,7 +158,7 @@ export function createFileExplorer(config, management, dependencies = { run }) {
     try { await handle.read(buffer, 0, readSize, details.size - readSize); } finally { await handle.close(); }
     let text = buffer.toString('utf8');
     if (details.size > readSize) text = text.slice(text.indexOf('\n') + 1);
-    const entries = text.split(/\r?\n/).filter(Boolean).slice(-limit).map(parseMinecraftLogLine);
+    const entries = text.split(/\r?\n/).filter((line) => line && !isRoutineRconLine(line)).slice(-limit).map(parseMinecraftLogLine);
     const crashDir = path.join(dataDir, 'crash-reports');
     const crashNames = await readdir(crashDir).catch((error) => error.code === 'ENOENT' ? [] : Promise.reject(error));
     const crashes = (await Promise.all(crashNames.filter((name) => !name.startsWith('.')).map(async (name) => {
