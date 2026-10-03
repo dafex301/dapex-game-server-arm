@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { access, chmod, copyFile, mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, copyFile, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import semver from 'semver';
 import yazl from 'yazl';
@@ -107,16 +107,28 @@ function powershellLiteral(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
-async function writeManualPack(profile, destination, loaderVersion) {
-  const files = profile.mods.filter((mod) => mod.source === 'modrinth' && mod.side?.client !== 'unsupported').map((mod) => {
+async function writeManualPack(profile, destination, loaderVersion, finalizedIndex = null, bundledOverrides = []) {
+  const files = finalizedIndex ? finalizedIndex.files.filter((file) => file.env?.client !== 'unsupported').map((file) => ({
+    name: path.posix.basename(file.path),
+    url: file.downloads?.[0],
+    sha512: file.hashes?.sha512?.toUpperCase(),
+    size: file.fileSize,
+  })) : profile.mods.filter((mod) => mod.source === 'modrinth' && mod.side?.client !== 'unsupported').map((mod) => {
     const file = primaryFile(mod);
-    if (!file?.url || !file.hashes?.sha512) throw new Error(`Manual installer requires a URL and SHA-512 for ${mod.name}`);
-    return { name: file.name, url: file.url, sha512: file.hashes.sha512.toUpperCase(), size: file.size };
+    return { name: file?.name, url: file?.url, sha512: file?.hashes?.sha512?.toUpperCase(), size: file?.size };
   });
-  const unsupported = profile.mods.filter((mod) => mod.source !== 'modrinth' && mod.side !== 'server');
-  if (unsupported.length) throw new Error(`Manual installer cannot safely distribute: ${unsupported.map((mod) => mod.name).join(', ')}`);
+  for (const file of files) if (!file.name || !file.url || !file.sha512) throw new Error(`Manual installer requires a URL and SHA-512 for ${file.name || 'a resolved mod'}`);
+  if (!finalizedIndex) {
+    const unsupported = profile.mods.filter((mod) => mod.source !== 'modrinth' && mod.side !== 'server');
+    if (unsupported.length) throw new Error(`Manual installer cannot safely distribute: ${unsupported.map((mod) => mod.name).join(', ')}`);
+  }
+  const bundled = await Promise.all(bundledOverrides.map(async (file) => {
+    const details = await stat(file.source);
+    return { source: file.source, path: file.path.replace(/^overrides\//, ''), sha512: (await hashFile(file.source, 'sha512')).toUpperCase(), size: details.size };
+  }));
   const fileRows = files.map((file) => `  @{ Name=${powershellLiteral(file.name)}; Url=${powershellLiteral(file.url)}; Sha512=${powershellLiteral(file.sha512)}; Size=${Number(file.size || 0)} }`).join(",\r\n");
-  const script = `$ErrorActionPreference = 'Stop'\r\n[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12\r\n$gameDir = Split-Path -Parent $MyInvocation.MyCommand.Path\r\n$modsDir = Join-Path $gameDir 'mods'\r\n$managedFile = Join-Path $modsDir '.dapex-managed-mods.txt'\r\n$files = @(\r\n${fileRows}\r\n)\r\n$newNames = @($files | ForEach-Object { $_.Name })\r\nNew-Item -ItemType Directory -Force -Path $modsDir | Out-Null\r\n$oldNames = @()\r\nif (Test-Path $managedFile) { $oldNames = @(Get-Content $managedFile | Where-Object { $_ }) }\r\n$allowed = @($newNames + $oldNames | Select-Object -Unique)\r\n$foreign = @(Get-ChildItem $modsDir -Filter '*.jar' -ErrorAction SilentlyContinue | Where-Object { $allowed -notcontains $_.Name })\r\nif ($foreign.Count -gt 0) {\r\n  Write-Host 'STOP: This is not a clean Dapex game directory.' -ForegroundColor Red\r\n  Write-Host ('Remove these foreign mods or extract this ZIP into a new folder: ' + (($foreign | ForEach-Object { $_.Name }) -join ', '))\r\n  exit 2\r\n}\r\n$sha512 = [System.Security.Cryptography.SHA512]::Create()\r\n$web = New-Object System.Net.WebClient\r\nforeach ($file in $files) {\r\n  $target = Join-Path $modsDir $file.Name\r\n  $temporary = $target + '.download'\r\n  Write-Host ('Downloading ' + $file.Name + '...') -ForegroundColor Cyan\r\n  $web.DownloadFile($file.Url, $temporary)\r\n  $stream = [System.IO.File]::OpenRead($temporary)\r\n  try { $hash = ([BitConverter]::ToString($sha512.ComputeHash($stream))).Replace('-', '') } finally { $stream.Dispose() }\r\n  if ($hash -ne $file.Sha512) { Remove-Item $temporary -Force; throw ('Hash verification failed for ' + $file.Name) }\r\n  Move-Item $temporary $target -Force\r\n}\r\nforeach ($oldName in $oldNames) {\r\n  if ($newNames -notcontains $oldName) { Remove-Item (Join-Path $modsDir $oldName) -Force -ErrorAction SilentlyContinue }\r\n}\r\n$newNames | Set-Content -Encoding ASCII $managedFile\r\nWrite-Host ''\r\nWrite-Host 'Dapex Fabric mods installed and verified.' -ForegroundColor Green\r\nWrite-Host 'Launch the dedicated Minecraft ${profile.minecraftVersion} / Fabric ${loaderVersion} profile, then connect to mc.fahrelgibran.com.'\r\n`;
+  const bundledRows = bundled.filter((file) => file.path.startsWith('mods/')).map((file) => `  @{ Name=${powershellLiteral(path.posix.basename(file.path))}; Sha512=${powershellLiteral(file.sha512)} }`).join(",\r\n");
+  const script = `$ErrorActionPreference = 'Stop'\r\n[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12\r\n$gameDir = Split-Path -Parent $MyInvocation.MyCommand.Path\r\n$modsDir = Join-Path $gameDir 'mods'\r\n$managedFile = Join-Path $modsDir '.dapex-managed-mods.txt'\r\n$files = @(\r\n${fileRows}\r\n)\r\n$bundled = @(\r\n${bundledRows}\r\n)\r\n$newNames = @($files | ForEach-Object { $_.Name }) + @($bundled | ForEach-Object { $_.Name })\r\nNew-Item -ItemType Directory -Force -Path $modsDir | Out-Null\r\n$oldNames = @()\r\nif (Test-Path $managedFile) { $oldNames = @(Get-Content $managedFile | Where-Object { $_ }) }\r\n$allowed = @($newNames + $oldNames | Select-Object -Unique)\r\n$foreign = @(Get-ChildItem $modsDir -Filter '*.jar' -ErrorAction SilentlyContinue | Where-Object { $allowed -notcontains $_.Name })\r\nif ($foreign.Count -gt 0) {\r\n  Write-Host 'STOP: This is not a clean Dapex game directory.' -ForegroundColor Red\r\n  Write-Host ('Remove these foreign mods or extract this ZIP into a new folder: ' + (($foreign | ForEach-Object { $_.Name }) -join ', '))\r\n  exit 2\r\n}\r\n$sha512 = [System.Security.Cryptography.SHA512]::Create()\r\n$web = New-Object System.Net.WebClient\r\nforeach ($file in $files) {\r\n  $target = Join-Path $modsDir $file.Name\r\n  $temporary = $target + '.download'\r\n  Write-Host ('Downloading ' + $file.Name + '...') -ForegroundColor Cyan\r\n  $web.DownloadFile($file.Url, $temporary)\r\n  $stream = [System.IO.File]::OpenRead($temporary)\r\n  try { $hash = ([BitConverter]::ToString($sha512.ComputeHash($stream))).Replace('-', '') } finally { $stream.Dispose() }\r\n  if ($hash -ne $file.Sha512) { Remove-Item $temporary -Force; throw ('Hash verification failed for ' + $file.Name) }\r\n  Move-Item $temporary $target -Force\r\n}\r\nforeach ($file in $bundled) {\r\n  $target = Join-Path $modsDir $file.Name\r\n  if (-not (Test-Path $target)) { throw ('Bundled mod is missing: ' + $file.Name) }\r\n  $stream = [System.IO.File]::OpenRead($target)\r\n  try { $hash = ([BitConverter]::ToString($sha512.ComputeHash($stream))).Replace('-', '') } finally { $stream.Dispose() }\r\n  if ($hash -ne $file.Sha512) { throw ('Hash verification failed for bundled mod ' + $file.Name) }\r\n}\r\nforeach ($oldName in $oldNames) {\r\n  if ($newNames -notcontains $oldName) { Remove-Item (Join-Path $modsDir $oldName) -Force -ErrorAction SilentlyContinue }\r\n}\r\n$newNames | Set-Content -Encoding ASCII $managedFile\r\nWrite-Host ''\r\nWrite-Host 'Dapex Fabric mods installed and verified.' -ForegroundColor Green\r\nWrite-Host 'Launch the dedicated Minecraft ${profile.minecraftVersion} / Fabric ${loaderVersion} profile, then connect to mc.fahrelgibran.com.'\r\n`;
   const readme = `DAPEX FABRIC ${profile.releaseName || `V${profile.release}`} - MANUAL WINDOWS SETUP\r\n\r\nThis package is for launchers that cannot import MRPACK, including legacy Windows 7 setups.\r\n\r\n1. Create a NEW, EMPTY game directory, for example C:\\Minecraft\\Dapex.\r\n2. In your launcher, create Minecraft ${profile.minecraftVersion} with Fabric Loader ${loaderVersion}.\r\n3. Set that launcher's Game Directory to the new Dapex folder.\r\n4. Extract every file from this ZIP into that folder.\r\n5. Double-click install-mods.bat. It downloads and verifies the exact release files.\r\n6. Launch the dedicated profile and connect to mc.fahrelgibran.com.\r\n\r\nDo not extract this into an existing RPG/modpack instance. The installer refuses unknown JAR files to prevent protocol mismatches.\r\nJava 21 is required by Minecraft ${profile.minecraftVersion}.\r\n`;
   const tutorial = `TUTORIAL DAPEX FABRIC ${profile.releaseName || `V${profile.release}`} - WINDOWS MANUAL\r\n\r\nINSTALASI PERTAMA\r\n1. Buat profil Minecraft ${profile.minecraftVersion} dengan Fabric Loader ${loaderVersion} di launcher.\r\n2. Pakai Game Directory baru dan kosong, contoh C:\\Minecraft\\Dapex.\r\n3. Extract seluruh isi ZIP ini ke Game Directory tersebut.\r\n4. Klik dua kali install-mods.bat dan tunggu sampai muncul pesan berhasil.\r\n5. Jalankan profil Fabric tadi lalu masuk ke mc.fahrelgibran.com.\r\n\r\nKETIKA ADA UPDATE MOD\r\n1. Buka https://play.fahrelgibran.com dan download Manual Windows versi terbaru.\r\n2. Extract/replace isinya ke Game Directory Dapex yang sama.\r\n3. Jalankan install-mods.bat lagi. Mod Dapex lama akan diperbarui atau dihapus otomatis.\r\n4. Jangan menyalakan Minecraft selama installer berjalan.\r\n\r\nPENTING\r\n- Jangan campur folder ini dengan modpack RPG atau mod lain.\r\n- Installer menolak JAR asing untuk mencegah Network Protocol Error.\r\n- Minecraft ${profile.minecraftVersion} membutuhkan Java 21.\r\n- Jika installer gagal, screenshot seluruh pesan di jendela hitam dan kirim ke admin.\r\n`;
   const batch = '@echo off\r\ncd /d "%~dp0"\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-mods.ps1"\r\necho.\r\npause\r\n';
@@ -125,7 +137,8 @@ async function writeManualPack(profile, destination, loaderVersion) {
   addBuffer(zip, tutorial, 'TUTORIAL.txt');
   addBuffer(zip, batch, 'install-mods.bat');
   addBuffer(zip, script, 'install-mods.ps1');
-  addBuffer(zip, `${JSON.stringify({ release: profile.release, minecraft: profile.minecraftVersion, fabricLoader: loaderVersion, files }, null, 2)}\n`, 'manual-manifest.json');
+  for (const file of bundled) zip.addFile(file.source, file.path);
+  addBuffer(zip, `${JSON.stringify({ release: profile.release, minecraft: profile.minecraftVersion, fabricLoader: loaderVersion, files, bundled: bundled.map(({ path: target, sha512, size }) => ({ path: target, sha512, size })) }, null, 2)}\n`, 'manual-manifest.json');
   await writeZip(zip, destination);
   return destination;
 }
@@ -329,11 +342,11 @@ export function createProfiles(config) {
     const release = current.release + 1;
     const published = { ...current, release, releaseName: `${current.name} v${release}`, publishedBy: safeActor(actor), publishedAt: new Date().toISOString() };
     await mkdir(releasesDir, { recursive: true });
-    const clientPack = await materializeServerProfile(published);
+    const materialized = await materializeServerProfile(published);
     await writeJsonAtomic(path.join(releasesDir, `v${release}.json`), published);
-    await copyFile(clientPack, path.join(releasesDir, `dapex-fabric-v${release}.mrpack`));
+    await copyFile(materialized.clientPack, path.join(releasesDir, `dapex-fabric-v${release}.mrpack`));
     try {
-      await writeManualPack(published, path.join(releasesDir, `dapex-fabric-v${release}-manual.zip`), config.fabricLoaderVersion);
+      await writeManualPack(published, path.join(releasesDir, `dapex-fabric-v${release}-manual.zip`), config.fabricLoaderVersion, materialized.index, materialized.clientOverrides);
     } catch (error) {
       if (!String(error.message).startsWith('Manual installer cannot safely distribute:')) throw error;
     }
@@ -414,7 +427,11 @@ export function createProfiles(config) {
       throw error;
     }
     await rm(previous, { recursive: true, force: true });
-    return path.join(generatedDir, `dapex-fabric-v${profile.release}.mrpack`);
+    return {
+      clientPack: path.join(generatedDir, `dapex-fabric-v${profile.release}.mrpack`),
+      index,
+      clientOverrides: clientOverrides.map((file) => ({ ...file, source: file.source.startsWith(buildDir) ? path.join(generatedDir, path.relative(buildDir, file.source)) : file.source })),
+    };
   }
 
   async function setVersion(version) {

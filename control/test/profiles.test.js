@@ -47,7 +47,11 @@ test('publishes uploaded Fabric jars into server mods and an importable MRPACK',
   assert(inspected.entries.some((entry) => entry.name === 'overrides/mods/example-1.0.0.jar'));
   assert.equal(JSON.parse(await readFile(path.join(deployDir, 'minecraft', 'generated', 'profile.json'))).release, 1);
   await access(await profile.clientPackFile(1));
-  assert.equal(await profile.manualPackFile(1), null);
+  const manual = await profile.manualPackFile(1);
+  await access(manual);
+  const manualArchive = await inspectZip(manual, new Set(['manual-manifest.json']));
+  assert(manualArchive.entries.some((entry) => entry.name === 'mods/example-1.0.0.jar'));
+  assert.equal(manualArchive.documents['manual-manifest.json'].bundled[0].path, 'mods/example-1.0.0.jar');
   assert.equal(await profile.clientPackFile(99), null);
   assert.equal(await profile.manualPackFile(99), null);
 });
