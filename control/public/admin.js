@@ -199,30 +199,53 @@ $('#world-reset-form').addEventListener('submit', async (event) => {
 
 async function refreshFiles() {
   const { scope, path } = state.files;
-  const listing = await api(`/api/admin/files?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}`);
-  state.files.listing = listing;
-  $('#file-path').textContent = `${scope}:/${path}`;
-  $('#file-scope-note').textContent = `${listing.description}${listing.writable ? ' · writable while Minecraft is offline' : ' · read-only'}`;
-  $('#file-upload-button').disabled = !listing.writable;
-  $('#file-new-folder').disabled = !listing.writable;
-  $('#file-list').innerHTML = listing.entries.length ? listing.entries.map((entry) => {
-    const relative = filePath(entry.name);
-    const download = `/api/admin/files/download?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(relative)}`;
-    return `<div class="file-row"><span class="file-icon">${entry.type === 'directory' ? 'D' : 'F'}</span><button class="file-open" data-file-open="${encodeURIComponent(entry.name)}" data-type="${entry.type}" data-editable="${entry.editable}">${escapeHtml(entry.name)}</button><small>${entry.type === 'file' ? bytes(entry.size) : 'folder'}</small><small>${new Date(entry.modifiedAt).toLocaleString()}</small><span class="file-actions">${entry.type === 'file' ? `<a href="${download}">DOWNLOAD</a>` : ''}${listing.writable ? `<button class="delete" data-file-delete="${encodeURIComponent(entry.name)}">DELETE</button>` : ''}</span></div>`;
-  }).join('') : '<p class="empty">This Minecraft folder is empty.</p>';
+  $('#file-list').innerHTML = '<div class="file-loading"><span></span><p>Opening folder…</p></div>';
+  try {
+    const listing = await api(`/api/admin/files?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}`);
+    state.files.listing = listing;
+    document.querySelectorAll('[data-file-scope]').forEach((node) => node.classList.toggle('active', node.dataset.fileScope === scope));
+    const segments = path.split('/').filter(Boolean);
+    $('#file-breadcrumb').innerHTML = [`<button data-crumb="">${escapeHtml(scope)}</button>`, ...segments.map((segment, index) => `<span>›</span><button data-crumb="${encodeURIComponent(segments.slice(0, index + 1).join('/'))}">${escapeHtml(segment)}</button>`)].join('');
+    $('#file-scope-note').textContent = `${listing.description}${listing.writable ? ' · writable while Minecraft is offline' : ' · read-only'}`;
+    $('#file-item-count').textContent = `${listing.entries.length} item${listing.entries.length === 1 ? '' : 's'}`;
+    $('#file-upload-button').disabled = !listing.writable;
+    $('#file-new-folder').disabled = !listing.writable;
+    $('#file-tree-children').innerHTML = listing.entries.filter((entry) => entry.type === 'directory').map((entry) => `<button class="tree-node child" data-tree-folder="${encodeURIComponent(entry.name)}"><span>›</span><i class="folder-icon"></i>${escapeHtml(entry.name)}</button>`).join('');
+    $('#file-list').innerHTML = listing.entries.length ? listing.entries.map((entry) => {
+      const relative = filePath(entry.name);
+      const download = `/api/admin/files/download?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(relative)}`;
+      return `<div class="file-row" data-row-type="${entry.type}"><span class="file-kind ${entry.type}"><i class="${entry.type === 'directory' ? 'folder-icon' : 'document-icon'}"></i></span><button class="file-open" data-file-open="${encodeURIComponent(entry.name)}" data-type="${entry.type}" data-editable="${entry.editable}">${escapeHtml(entry.name)}</button><small>${entry.type === 'file' ? bytes(entry.size) : 'File folder'}</small><small>${new Date(entry.modifiedAt).toLocaleString()}</small><span class="file-actions">${entry.type === 'file' ? `<a href="${download}" title="Download">↓</a>` : ''}${listing.writable ? `<button class="delete" data-file-delete="${encodeURIComponent(entry.name)}" title="Delete">×</button>` : ''}</span></div>`;
+    }).join('') : '<div class="file-empty"><i class="folder-icon"></i><strong>This folder is empty</strong><p>Drop a file here or create a folder.</p></div>';
+  } catch (error) {
+    $('#file-list').innerHTML = `<div class="file-empty error"><strong>Could not open this folder</strong><p>${escapeHtml(error.message)}</p><button id="file-retry">Try again</button></div>`;
+    $('#file-item-count').textContent = 'Unavailable';
+    throw error;
+  }
 }
 
-$('#file-scope').addEventListener('change', async (event) => {
-  state.files.scope = event.target.value; state.files.path = ''; state.files.editing = null; $('#file-editor').hidden = true;
+document.querySelectorAll('[data-file-scope]').forEach((node) => node.addEventListener('click', async () => {
+  state.files.scope = node.dataset.fileScope; state.files.path = ''; state.files.editing = null; $('#file-editor').hidden = true;
   try { await refreshFiles(); } catch (error) { toast(error.message, true); }
+}));
+
+$('#file-breadcrumb').addEventListener('click', async (event) => {
+  const crumb = event.target.closest('[data-crumb]'); if (!crumb) return;
+  state.files.path = decodeURIComponent(crumb.dataset.crumb); await refreshFiles().catch((error) => toast(error.message, true));
+});
+
+$('#file-tree-children').addEventListener('click', async (event) => {
+  const folder = event.target.closest('[data-tree-folder]'); if (!folder) return;
+  state.files.path = filePath(decodeURIComponent(folder.dataset.treeFolder)); await refreshFiles().catch((error) => toast(error.message, true));
 });
 
 $('#file-up').addEventListener('click', async () => {
   state.files.path = state.files.path.split('/').slice(0, -1).join('/');
   try { await refreshFiles(); } catch (error) { toast(error.message, true); }
 });
+$('#file-refresh').addEventListener('click', () => refreshFiles().catch((error) => toast(error.message, true)));
 
 $('#file-list').addEventListener('click', async (event) => {
+  if (event.target.closest('#file-retry')) return refreshFiles().catch((error) => toast(error.message, true));
   const opener = event.target.closest('[data-file-open]');
   const remover = event.target.closest('[data-file-delete]');
   if (opener) {
@@ -262,8 +285,8 @@ $('#file-new-folder').addEventListener('click', async () => {
   } catch (error) { toast(error.message, true); }
 });
 $('#file-upload-button').addEventListener('click', () => explorerUpload.click());
-explorerUpload.addEventListener('change', async () => {
-  const file = explorerUpload.files[0]; if (!file) return;
+async function uploadExplorerFile(file) {
+  if (!file || !state.files.listing?.writable) return toast('This folder is read-only', true);
   const form = new FormData(); form.append('file', file);
   try {
     const response = await fetch(`/api/admin/files/upload?scope=${encodeURIComponent(state.files.scope)}&path=${encodeURIComponent(state.files.path)}`, { method: 'POST', body: form });
@@ -271,7 +294,13 @@ explorerUpload.addEventListener('change', async () => {
     await refreshFiles(); toast(`${file.name} uploaded after a verified backup`);
   } catch (error) { toast(error.message, true); }
   finally { explorerUpload.value = ''; }
-});
+}
+explorerUpload.addEventListener('change', () => uploadExplorerFile(explorerUpload.files[0]));
+
+const dropSurface = $('#file-drop-surface');
+for (const eventName of ['dragenter', 'dragover']) dropSurface.addEventListener(eventName, (event) => { event.preventDefault(); if (state.files.listing?.writable) dropSurface.classList.add('dragging'); });
+for (const eventName of ['dragleave', 'drop']) dropSurface.addEventListener(eventName, (event) => { event.preventDefault(); dropSurface.classList.remove('dragging'); });
+dropSurface.addEventListener('drop', (event) => uploadExplorerFile(event.dataTransfer.files[0]));
 
 const sections = [...document.querySelectorAll('.section-block')];
 const navLinks = [...document.querySelectorAll('.sidebar nav a')];
@@ -282,5 +311,5 @@ const sectionObserver = new IntersectionObserver((entries) => {
 }, { rootMargin: '-35% 0px -55%' });
 sections.forEach((section) => sectionObserver.observe(section));
 
-Promise.all([refresh(), refreshFiles()]).catch((error) => toast(error.message, true));
+Promise.allSettled([refresh(), refreshFiles()]).then((results) => results.filter((result) => result.status === 'rejected').forEach((result) => toast(result.reason.message, true)));
 setInterval(() => refresh().catch(() => {}), 30_000);
