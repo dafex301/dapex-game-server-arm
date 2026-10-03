@@ -84,6 +84,15 @@ app.get('/packwiz/pack.toml', asyncRoute(async (_request, response) => {
   response.set('Cache-Control', 'no-store');
   response.type('text/plain').sendFile(file);
 }));
+app.use('/packwiz', asyncRoute(async (request, response, next) => {
+  if (!['GET', 'HEAD'].includes(request.method) || request.path.startsWith('/releases/')) return next();
+  const relative = request.path.replace(/^\/+/, '');
+  const profile = await profiles.active();
+  const file = await profiles.packwizAssetFile(profile.release, relative);
+  if (!file) return response.status(404).type('text/plain').send('Packwiz asset not found.');
+  response.set('Cache-Control', 'no-store');
+  response.sendFile(file);
+}));
 app.get('/downloads/dapex-fabric-v:release.mrpack', asyncRoute(async (request, response) => {
   if (!/^\d+$/.test(request.params.release)) return response.status(404).json({ error: 'Release not found' });
   const release = Number(request.params.release);

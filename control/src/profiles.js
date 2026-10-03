@@ -13,6 +13,10 @@ const packwizBootstrap = {
   url: 'https://github.com/packwiz/packwiz-installer-bootstrap/releases/download/v0.0.3/packwiz-installer-bootstrap.jar',
   sha256: 'a8fbb24dc604278e97f4688e82d3d91a318b98efc08d5dbfcbcbcab6443d116c',
 };
+const packwizInstaller = {
+  url: 'https://github.com/packwiz/packwiz-installer/releases/download/v0.5.14/packwiz-installer.jar',
+  sha256: 'c9f646908d340d84773948a9a7d98bc1dae250d35e1016dc6e2b8459760b5598',
+};
 
 function initialProfile(config) {
   return {
@@ -133,6 +137,20 @@ async function ensurePackwizBootstrap(config) {
   return destination;
 }
 
+async function ensurePackwizInstaller(config) {
+  if (config.packwizInstallerFile) return config.packwizInstallerFile;
+  const destination = path.join(config.stateDir, 'tools', 'packwiz-installer.jar');
+  try {
+    if (await hashFile(destination) === packwizInstaller.sha256) return destination;
+  } catch {}
+  const response = await fetch(packwizInstaller.url, { redirect: 'follow', headers: { 'User-Agent': 'dapex-game-control/0.1 (packwiz installer)' } });
+  if (!response.ok) throw new Error(`Packwiz installer download failed (${response.status})`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (createHash('sha256').update(bytes).digest('hex') !== packwizInstaller.sha256) throw new Error('Packwiz installer SHA-256 mismatch');
+  await writeFileAtomic(destination, bytes);
+  return destination;
+}
+
 async function writePackwizDistribution(profile, destination, autoPackDestination, config, finalizedIndex, clientOverrides) {
   await rm(destination, { recursive: true, force: true });
   await mkdir(destination, { recursive: true });
@@ -189,8 +207,8 @@ async function writePackwizDistribution(profile, destination, autoPackDestinatio
   const pack = `name = ${tomlString(profile.name)}\nauthor = "Dapex"\nversion = "${profile.release}"\npack-format = "packwiz:1.1.0"\n\n[index]\nfile = "index.toml"\nhash-format = "sha256"\nhash = "${indexHash}"\n\n[versions]\nminecraft = ${tomlString(profile.minecraftVersion)}\nfabric = ${tomlString(config.fabricLoaderVersion)}\n`;
   await writeFileAtomic(path.join(destination, 'pack.toml'), pack);
 
-  const bootstrap = await ensurePackwizBootstrap(config);
-  const instance = `InstanceType=OneSix\nJoinServerOnLaunch=false\nMCLaunchMethod=LauncherPart\nOverrideCommands=true\nPreLaunchCommand=\"$INST_JAVA\" -jar packwiz-installer-bootstrap.jar -s client ${config.playerBaseUrl.replace(/\/$/, '')}/packwiz/pack.toml\nname=${profile.name}\n`;
+  const [bootstrap, installer] = await Promise.all([ensurePackwizBootstrap(config), ensurePackwizInstaller(config)]);
+  const instance = `InstanceType=OneSix\nJoinServerOnLaunch=false\nMCLaunchMethod=LauncherPart\nOverrideCommands=true\nPreLaunchCommand=\"$INST_JAVA\" -jar packwiz-installer-bootstrap.jar --bootstrap-main-jar packwiz-installer.jar --bootstrap-no-update -s client ${config.playerBaseUrl.replace(/\/$/, '')}/packwiz/pack.toml\nname=${profile.name}\n`;
   const components = { formatVersion: 1, components: [
     { uid: 'net.minecraft', version: profile.minecraftVersion, important: true },
     { uid: 'net.fabricmc.fabric-loader', version: config.fabricLoaderVersion },
@@ -201,6 +219,7 @@ async function writePackwizDistribution(profile, destination, autoPackDestinatio
   addBuffer(zip, `${JSON.stringify(components, null, 2)}\n`, 'mmc-pack.json');
   addBuffer(zip, tutorial, 'TUTORIAL.txt');
   zip.addFile(bootstrap, 'minecraft/packwiz-installer-bootstrap.jar');
+  zip.addFile(installer, 'minecraft/packwiz-installer.jar');
   await writeZip(zip, autoPackDestination);
 }
 
@@ -582,5 +601,13 @@ export function createProfiles(config) {
     try { await access(destination); return destination; } catch { return null; }
   }
 
-  return { active, draft, addModrinth, removeMod, importUpload, compatibility, publish, setVersion, clientPackFile, manualPackFile, autoPackFile, packwizPackFile };
+  async function packwizAssetFile(release, relative) {
+    if (!Number.isSafeInteger(release) || release < 1 || typeof relative !== 'string' || !relative) return null;
+    const root = path.resolve(profileDir, 'packwiz', `v${release}`);
+    const destination = path.resolve(root, relative);
+    if (!destination.startsWith(`${root}${path.sep}`)) return null;
+    try { await access(destination); return destination; } catch { return null; }
+  }
+
+  return { active, draft, addModrinth, removeMod, importUpload, compatibility, publish, setVersion, clientPackFile, manualPackFile, autoPackFile, packwizPackFile, packwizAssetFile };
 }

@@ -31,7 +31,9 @@ than being silently omitted. Nested MRPACK import remains blocked; add those
 projects through the Modrinth catalog instead.
 
 Each successful publish also creates an immutable Packwiz directory and a Prism
-instance ZIP containing the pinned Packwiz bootstrapper. `play.fahrelgibran.com`
+instance ZIP containing pinned, checksum-verified Packwiz bootstrapper and
+installer JARs. The pre-launch task does not depend on GitHub's rate-limited API.
+`play.fahrelgibran.com`
 serves the current `pack.toml` without caching, while versioned indexes,
 metadata, and uploaded blobs are immutable. Prism runs the client-side updater
 before launch, so an interrupted or invalid download prevents Minecraft from
