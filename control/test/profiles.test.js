@@ -47,7 +47,9 @@ test('publishes uploaded Fabric jars into server mods and an importable MRPACK',
   assert(inspected.entries.some((entry) => entry.name === 'overrides/mods/example-1.0.0.jar'));
   assert.equal(JSON.parse(await readFile(path.join(deployDir, 'minecraft', 'generated', 'profile.json'))).release, 1);
   await access(await profile.clientPackFile(1));
+  assert.equal(await profile.manualPackFile(1), null);
   assert.equal(await profile.clientPackFile(99), null);
+  assert.equal(await profile.manualPackFile(99), null);
 });
 
 test('blocks a CurseForge pack archive instead of silently publishing an incomplete release', async () => {

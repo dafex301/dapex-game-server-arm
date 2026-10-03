@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { chmod, copyFile, mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, copyFile, mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import semver from 'semver';
 import yazl from 'yazl';
@@ -74,6 +74,31 @@ function writeZip(zip, destination) {
     });
     zip.end();
   });
+}
+
+function powershellLiteral(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+async function writeManualPack(profile, destination, loaderVersion) {
+  const files = profile.mods.filter((mod) => mod.source === 'modrinth' && mod.side?.client !== 'unsupported').map((mod) => {
+    const file = primaryFile(mod);
+    if (!file?.url || !file.hashes?.sha512) throw new Error(`Manual installer requires a URL and SHA-512 for ${mod.name}`);
+    return { name: file.name, url: file.url, sha512: file.hashes.sha512.toUpperCase(), size: file.size };
+  });
+  const unsupported = profile.mods.filter((mod) => mod.source !== 'modrinth' && mod.side !== 'server');
+  if (unsupported.length) throw new Error(`Manual installer cannot safely distribute: ${unsupported.map((mod) => mod.name).join(', ')}`);
+  const fileRows = files.map((file) => `  @{ Name=${powershellLiteral(file.name)}; Url=${powershellLiteral(file.url)}; Sha512=${powershellLiteral(file.sha512)}; Size=${Number(file.size || 0)} }`).join(",\r\n");
+  const script = `$ErrorActionPreference = 'Stop'\r\n[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12\r\n$gameDir = Split-Path -Parent $MyInvocation.MyCommand.Path\r\n$modsDir = Join-Path $gameDir 'mods'\r\n$files = @(\r\n${fileRows}\r\n)\r\n$allowed = @($files | ForEach-Object { $_.Name })\r\nNew-Item -ItemType Directory -Force -Path $modsDir | Out-Null\r\n$foreign = @(Get-ChildItem $modsDir -Filter '*.jar' -ErrorAction SilentlyContinue | Where-Object { $allowed -notcontains $_.Name })\r\nif ($foreign.Count -gt 0) {\r\n  Write-Host 'STOP: This is not a clean Dapex game directory.' -ForegroundColor Red\r\n  Write-Host ('Remove these foreign mods or extract this ZIP into a new folder: ' + (($foreign | ForEach-Object { $_.Name }) -join ', '))\r\n  exit 2\r\n}\r\n$sha512 = [System.Security.Cryptography.SHA512]::Create()\r\n$web = New-Object System.Net.WebClient\r\nforeach ($file in $files) {\r\n  $target = Join-Path $modsDir $file.Name\r\n  $temporary = $target + '.download'\r\n  Write-Host ('Downloading ' + $file.Name + '...') -ForegroundColor Cyan\r\n  $web.DownloadFile($file.Url, $temporary)\r\n  $stream = [System.IO.File]::OpenRead($temporary)\r\n  try { $hash = ([BitConverter]::ToString($sha512.ComputeHash($stream))).Replace('-', '') } finally { $stream.Dispose() }\r\n  if ($hash -ne $file.Sha512) { Remove-Item $temporary -Force; throw ('Hash verification failed for ' + $file.Name) }\r\n  Move-Item $temporary $target -Force\r\n}\r\nWrite-Host ''\r\nWrite-Host 'Dapex Fabric mods installed and verified.' -ForegroundColor Green\r\nWrite-Host 'Launch the dedicated Minecraft 1.21.1 / Fabric ${loaderVersion} profile, then connect to mc.fahrelgibran.com.'\r\n`;
+  const readme = `DAPEX FABRIC ${profile.releaseName || `V${profile.release}`} - MANUAL WINDOWS SETUP\r\n\r\nThis package is for launchers that cannot import MRPACK, including legacy Windows 7 setups.\r\n\r\n1. Create a NEW, EMPTY game directory, for example C:\\Minecraft\\Dapex.\r\n2. In your launcher, create Minecraft ${profile.minecraftVersion} with Fabric Loader ${loaderVersion}.\r\n3. Set that launcher's Game Directory to the new Dapex folder.\r\n4. Extract every file from this ZIP into that folder.\r\n5. Double-click install-mods.bat. It downloads and verifies the exact release files.\r\n6. Launch the dedicated profile and connect to mc.fahrelgibran.com.\r\n\r\nDo not extract this into an existing RPG/modpack instance. The installer refuses unknown JAR files to prevent protocol mismatches.\r\nJava 21 is required by Minecraft ${profile.minecraftVersion}.\r\n`;
+  const batch = '@echo off\r\ncd /d "%~dp0"\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-mods.ps1"\r\necho.\r\npause\r\n';
+  const zip = new yazl.ZipFile();
+  addBuffer(zip, readme, 'README-WINDOWS.txt');
+  addBuffer(zip, batch, 'install-mods.bat');
+  addBuffer(zip, script, 'install-mods.ps1');
+  addBuffer(zip, `${JSON.stringify({ release: profile.release, minecraft: profile.minecraftVersion, fabricLoader: loaderVersion, files }, null, 2)}\n`, 'manual-manifest.json');
+  await writeZip(zip, destination);
+  return destination;
 }
 
 async function exposeToContainer(directory) {
@@ -235,6 +260,11 @@ export function createProfiles(config) {
     const clientPack = await materializeServerProfile(published);
     await writeJsonAtomic(path.join(releasesDir, `v${release}.json`), published);
     await copyFile(clientPack, path.join(releasesDir, `dapex-fabric-v${release}.mrpack`));
+    try {
+      await writeManualPack(published, path.join(releasesDir, `dapex-fabric-v${release}-manual.zip`), config.fabricLoaderVersion);
+    } catch (error) {
+      if (!String(error.message).startsWith('Manual installer cannot safely distribute:')) throw error;
+    }
     await writeJsonAtomic(activeFile, published);
     await writeJsonAtomic(draftFile, published);
     return published;
@@ -338,5 +368,19 @@ export function createProfiles(config) {
     return manifest ? path.join(releasesDir, `dapex-fabric-v${release}.mrpack`) : null;
   }
 
-  return { active, draft, addModrinth, removeMod, importUpload, compatibility, publish, setVersion, clientPackFile };
+  async function manualPackFile(release) {
+    if (!Number.isSafeInteger(release) || release < 1) return null;
+    const manifest = await readJson(path.join(releasesDir, `v${release}.json`), null);
+    if (!manifest) return null;
+    const destination = path.join(releasesDir, `dapex-fabric-v${release}-manual.zip`);
+    try { await access(destination); } catch {
+      try { await writeManualPack(manifest, destination, config.fabricLoaderVersion); } catch (error) {
+        if (String(error.message).startsWith('Manual installer cannot safely distribute:')) return null;
+        throw error;
+      }
+    }
+    return destination;
+  }
+
+  return { active, draft, addModrinth, removeMod, importUpload, compatibility, publish, setVersion, clientPackFile, manualPackFile };
 }

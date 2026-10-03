@@ -73,7 +73,8 @@ app.get('/play', (_request, response) => response.sendFile(path.join(import.meta
 
 app.get('/api/public', asyncRoute(async (_request, response) => {
   const [status, profile] = await Promise.all([orchestrator.status(), profiles.active()]);
-  response.json({ status: { active: status.active, stats: status.stats }, profile, minecraftAddress: config.minecraftAddress, clientPack: profile.release ? `/downloads/dapex-fabric-v${profile.release}.mrpack` : null });
+  const manualPackFile = profile.release ? await profiles.manualPackFile(profile.release) : null;
+  response.json({ status: { active: status.active, stats: status.stats }, profile, minecraftAddress: config.minecraftAddress, clientPack: profile.release ? `/downloads/dapex-fabric-v${profile.release}.mrpack` : null, manualPack: manualPackFile ? `/downloads/dapex-fabric-v${profile.release}-manual.zip` : null });
 }));
 app.get('/downloads/dapex-fabric-v:release.mrpack', asyncRoute(async (request, response) => {
   if (!/^\d+$/.test(request.params.release)) return response.status(404).json({ error: 'Release not found' });
@@ -81,6 +82,13 @@ app.get('/downloads/dapex-fabric-v:release.mrpack', asyncRoute(async (request, r
   const file = await profiles.clientPackFile(release);
   if (!file) return response.status(404).json({ error: 'Release not found' });
   response.download(file, `Dapex-Fabric-v${release}.mrpack`);
+}));
+app.get('/downloads/dapex-fabric-v:release-manual.zip', asyncRoute(async (request, response) => {
+  if (!/^\d+$/.test(request.params.release)) return response.status(404).json({ error: 'Release not found' });
+  const release = Number(request.params.release);
+  const file = await profiles.manualPackFile(release);
+  if (!file) return response.status(404).json({ error: 'Release not found' });
+  response.download(file, `Dapex-Fabric-v${release}-Manual-Windows.zip`);
 }));
 
 app.use('/api/admin', auth, requireSameOrigin(config));
