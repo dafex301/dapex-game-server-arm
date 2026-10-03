@@ -17,7 +17,7 @@ image=$(tr -d '[:space:]' < "$image_file")
 # release. Remove stale managed JARs so upgrades and removals cannot leave a
 # second version for Fabric to discover. The container copies /mods back into
 # /data during initialization.
-find minecraft/data/mods -mindepth 1 -maxdepth 1 -type f -name '*.jar' -delete
+sudo find minecraft/data/mods -mindepth 1 -maxdepth 1 -type f -name '*.jar' -delete
 
 docker run -d --name minecraft --restart no \
   --stop-timeout 120 --memory 7g --memory-swap 7g --cpus 1.75 \
