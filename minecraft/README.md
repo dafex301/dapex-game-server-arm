@@ -45,4 +45,7 @@ the release. Do not weaken server online authentication for legacy clients.
 
 Run `scripts/backup-minecraft.sh` while Minecraft owns the game slot. The script
 uses the shared maintenance lock, stops the container, archives and verifies the
-world, and resumes it afterward.
+world, and resumes it afterward. Local archives keep at most five snapshots for
+seven days and 8 GiB total, and refuse to consume the final 15 GiB of host disk.
+The admin dashboard exposes this quick-rollback layer separately from encrypted
+off-host restic/R2 history.

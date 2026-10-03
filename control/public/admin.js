@@ -1,4 +1,4 @@
-const state = { payload: null, busy: false };
+const state = { payload: null, management: null, busy: false };
 const $ = (selector) => document.querySelector(selector);
 
 async function api(url, options = {}) {
@@ -18,6 +18,7 @@ function toast(message, error = false) {
 
 function modKey(mod) { return `${mod.source}:${mod.projectId || mod.sha256}`; }
 function sideLabel(side) { return typeof side === 'object' && side ? `client:${side.client || '?'} / server:${side.server || '?'}` : String(side || 'unknown'); }
+function bytes(value) { return value >= 1024 ** 3 ? `${(value / 1024 ** 3).toFixed(1)} GiB` : `${(value / 1024 ** 2).toFixed(0)} MiB`; }
 
 function render() {
   const { status, active, draft, compatibility } = state.payload;
@@ -27,6 +28,7 @@ function render() {
   $('#memory').textContent = status.stats?.memory || '—';
   $('#interlock').textContent = status.invariantOk ? 'ARMED' : 'FAULT';
   $('#interlock').className = status.invariantOk ? 'good' : 'bad';
+  $('#rail-status').textContent = `${status.active.toUpperCase()} ONLINE`;
   document.querySelectorAll('[data-game]').forEach((button) => button.classList.toggle('active', button.dataset.game === status.active));
   $('#release-badge').textContent = `v${active.release} active · draft`;
   $('#profile-name').textContent = draft.name;
@@ -42,6 +44,22 @@ function render() {
     </article>`).join('') : '<div class="empty-manifest">No mods staged yet. Fabric itself will still boot.</div>';
   if (status.active === 'minecraft') refreshWhitelist();
   else $('#whitelist-output').textContent = 'Start Minecraft to manage the whitelist.';
+
+  const management = state.management;
+  if (management) {
+    const usedPercent = Math.max(0, Math.min(100, ((management.disk.total - management.disk.free) / management.disk.total) * 100));
+    $('#disk-free').textContent = bytes(management.disk.free);
+    $('#disk-fill').style.width = `${usedPercent}%`;
+    $('#disk-copy').textContent = `${usedPercent.toFixed(0)}% used · ${bytes(management.disk.reserve)} protected reserve`;
+    $('#world-name').textContent = management.world.name;
+    $('#world-seed').textContent = management.world.seed ? `seed ${management.world.seed}` : 'random seed';
+    $('#backup-count').textContent = `${management.backups.length} / ${management.retention.count}`;
+    $('#backup-list').innerHTML = management.backups.length ? management.backups.map((backup) => `<div class="backup-item"><div><b>${escapeHtml(backup.name)}</b><small>${new Date(backup.createdAt).toLocaleString()}</small></div><code>${bytes(backup.size)}</code></div>`).join('') : '<p class="empty">No local snapshots retained. R2 history is separate.</p>';
+    for (const [key, value] of Object.entries(management.settings)) {
+      const field = document.querySelector(`[name="${key}"]`);
+      if (field && document.activeElement !== field) field.value = value;
+    }
+  }
 }
 
 function escapeHtml(value) {
@@ -49,7 +67,7 @@ function escapeHtml(value) {
 }
 
 async function refresh() {
-  state.payload = await api('/api/admin/status');
+  [state.payload, state.management] = await Promise.all([api('/api/admin/status'), api('/api/admin/management')]);
   render();
 }
 
@@ -144,6 +162,48 @@ $('#whitelist-add').addEventListener('click', async () => {
     $('#whitelist-name').value = ''; await refreshWhitelist(); toast(result.message || `${username} allowed`);
   } catch (error) { toast(error.message, true); }
 });
+
+$('#refresh-button').addEventListener('click', () => refresh().then(() => toast('Dashboard refreshed')).catch((error) => toast(error.message, true)));
+
+$('#backup-button').addEventListener('click', async () => {
+  if (state.busy || !confirm('Create a consistent Minecraft snapshot now? The server may pause briefly.')) return;
+  state.busy = true;
+  const button = $('#backup-button');
+  button.disabled = true; button.textContent = 'Creating & verifying backup…';
+  try { await api('/api/admin/backups', { method: 'POST', body: '{}' }); await refresh(); toast('Minecraft backup verified and retained safely'); }
+  catch (error) { toast(error.message, true); }
+  finally { state.busy = false; button.disabled = false; button.textContent = 'Create safe backup now'; }
+});
+
+$('#settings-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const settings = Object.fromEntries(new FormData(event.currentTarget));
+  if (!confirm('Save these settings for the next Minecraft start?')) return;
+  try { state.management = await api('/api/admin/minecraft/settings', { method: 'PATCH', body: JSON.stringify(settings) }); render(); toast('Settings saved for the next clean start'); }
+  catch (error) { toast(error.message, true); }
+});
+
+$('#world-reset-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const values = Object.fromEntries(new FormData(event.currentTarget));
+  const current = state.management?.world?.name || 'world';
+  if (!confirm(`Create "${values.name}" and replace the live world "${current}"? A verified backup is created first.`)) return;
+  const confirmation = prompt(`Type the current world name (${current}) to continue:`);
+  if (confirmation !== current) return toast('World name did not match; nothing changed', true);
+  try {
+    state.management = await api('/api/admin/world/reset', { method: 'POST', body: JSON.stringify(values) });
+    event.currentTarget.reset(); render(); toast(`World ${values.name} is ready for the next Minecraft start`);
+  } catch (error) { toast(error.message, true); }
+});
+
+const sections = [...document.querySelectorAll('.section-block')];
+const navLinks = [...document.querySelectorAll('.sidebar nav a')];
+const sectionObserver = new IntersectionObserver((entries) => {
+  const visible = entries.find((entry) => entry.isIntersecting);
+  if (!visible) return;
+  navLinks.forEach((link) => link.classList.toggle('active', link.hash === `#${visible.target.id}`));
+}, { rootMargin: '-35% 0px -55%' });
+sections.forEach((section) => sectionObserver.observe(section));
 
 refresh().catch((error) => toast(error.message, true));
 setInterval(() => refresh().catch(() => {}), 30_000);

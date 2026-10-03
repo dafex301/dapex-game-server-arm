@@ -11,10 +11,12 @@ import { loadConfig } from './config.js';
 import { createOrchestrator } from './orchestrator.js';
 import { createProfiles } from './profiles.js';
 import { minecraftWhitelist } from './docker.js';
+import { createManagement } from './management.js';
 
 const config = loadConfig();
 const orchestrator = createOrchestrator(config);
 const profiles = createProfiles(config);
+const management = createManagement(config);
 const app = express();
 const uploadDir = path.join(config.stateDir, 'incoming');
 await mkdir(uploadDir, { recursive: true });
@@ -33,6 +35,7 @@ const addSchema = z.object({ source: z.literal('modrinth'), projectId: z.string(
 const versionSchema = z.object({ version: z.string().regex(/^\d+\.\d+(?:\.\d+)?$/) });
 const switchSchema = z.object({ target: z.enum(['valheim', 'minecraft', 'none']) });
 const whitelistSchema = z.object({ username: z.string().regex(/^[A-Za-z0-9_]{3,16}$/) });
+const worldSchema = z.object({ name: z.string().trim().min(1).max(64), seed: z.string().max(128).optional().default('') });
 
 async function requireMinecraftReady() {
   const status = await orchestrator.status();
@@ -138,6 +141,27 @@ app.delete('/api/admin/minecraft/whitelist', asyncRoute(async (request, response
   await requireMinecraftReady();
   const message = await minecraftWhitelist(config.minecraftContainer, 'remove', username);
   response.json({ message });
+}));
+
+app.get('/api/admin/management', asyncRoute(async (_request, response) => response.json(await management.overview())));
+app.post('/api/admin/backups', asyncRoute(async (_request, response) => response.status(201).json(await management.backup())));
+app.patch('/api/admin/minecraft/settings', asyncRoute(async (request, response) => {
+  const status = await orchestrator.status();
+  if (status.active === 'minecraft') {
+    const error = new Error('Stop Minecraft before applying server settings');
+    error.status = 409;
+    throw error;
+  }
+  response.json(await management.updateSettings(request.body || {}));
+}));
+app.post('/api/admin/world/reset', asyncRoute(async (request, response) => {
+  const status = await orchestrator.status();
+  if (status.active === 'minecraft') {
+    const error = new Error('Switch Minecraft to Offline before creating a new world');
+    error.status = 409;
+    throw error;
+  }
+  response.status(201).json(await management.resetWorld(worldSchema.parse(request.body)));
 }));
 
 app.use((error, request, response, _next) => {

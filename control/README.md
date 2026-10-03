@@ -14,6 +14,8 @@ Cloudflare Access email allowlist. Never publish port 8787 directly.
 - optional CurseForge search with an API key;
 - inspected manual Fabric JAR upload and complete CurseForge pack ZIP import;
 - immutable Dapex Fabric release manifests and downloadable MRPACK files.
+- an operations dashboard with bounded local backups, safe server settings,
+  disk-reserve reporting, and backup-first world replacement.
 
 Modrinth mods are downloaded over HTTPS and verified against the recorded
 SHA-512 before being placed in the server profile. Uploaded JARs and packs are
@@ -24,6 +26,13 @@ and the pack's overrides are carried into both the server profile and MRPACK.
 Files whose authors disable API distribution fail the release explicitly rather
 than being silently omitted. Nested MRPACK import remains blocked; add those
 projects through the Modrinth catalog instead.
+
+Local Minecraft snapshots are deliberately bounded to five files, seven days,
+and 8 GiB while preserving a 15 GiB free-disk reserve. Creating a new world is
+only allowed while Minecraft is offline; the controller verifies a backup,
+removes the old live world, records the new name/seed, and recreates the
+container so its environment cannot remain stale. Long-term snapshots remain
+encrypted in the separate restic/R2 repository.
 
 ## Host installation
 
@@ -90,3 +99,8 @@ Runtime state lives in `/var/lib/dapex-game-control` by default. Uploaded JARs,
 release manifests, and every published MRPACK are retained there. World data is
 separate in `minecraft/data` and must be backed up with
 `scripts/backup-minecraft.sh` before risky mod or version changes.
+
+The controller unit permits privilege elevation for the repository's existing
+backup scripts. Its Docker group membership is already root-equivalent, so this
+does not create a new security boundary; protect Cloudflare Access, the internal
+token, and host login accordingly.

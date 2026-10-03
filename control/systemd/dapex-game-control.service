@@ -14,7 +14,9 @@ ExecStart=@NODE_BIN@ @DEPLOY_DIR@/control/src/server.js
 Restart=on-failure
 RestartSec=5
 UMask=0077
-NoNewPrivileges=true
+# Backup/world operations use the repository's narrowly-scoped sudo commands.
+# The service already belongs to the docker group, which is root-equivalent.
+NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
