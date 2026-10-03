@@ -1,6 +1,6 @@
 # Dapex Fabric
 
-The initial target is Minecraft Java 1.21.1, Fabric Loader 0.16.10, Java 21,
+The current target is Minecraft Java 1.21.1, Fabric Loader 0.19.5, Java 21,
 online authentication, and a whitelist. The container is pinned by repository
 digest in `image.txt`; Minecraft, loader, and mod versions never update merely
 because a newer release exists.

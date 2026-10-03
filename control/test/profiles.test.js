@@ -68,6 +68,16 @@ test('serializes concurrent uploads so every file remains in the draft', async (
   assert.deepEqual(draft.mods.map((mod) => mod.name).sort(), ['First', 'Second']);
 });
 
+test('blocks publishing when an uploaded mod requires a newer Fabric Loader', async () => {
+  const { deployDir, profile } = await fixture();
+  const upload = path.join(deployDir, 'future-loader.jar');
+  await createZip(upload, { 'fabric.mod.json': JSON.stringify({ id: 'future-loader', name: 'Future Loader', version: '1.0.0', environment: '*', depends: { minecraft: '1.21.1', fabricloader: '>=0.19.0' } }) });
+  await profile.importUpload(upload, 'future-loader.jar', 'test@example.com');
+  const check = profile.compatibility(await profile.draft());
+  assert.equal(check.ok, false);
+  assert.match(check.issues[0].message, /Requires Fabric Loader >=0.19.0; configured 0.16.10/);
+});
+
 test('ignores an exact mod version duplicate and requires a decision for version conflicts', async () => {
   const { deployDir, profile } = await fixture();
   const first = path.join(deployDir, 'example-v1.jar');

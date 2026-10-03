@@ -82,6 +82,11 @@ function collapseExactDuplicates(profile) {
   return profile;
 }
 
+function satisfiesVersionRequirement(version, requirement) {
+  const ranges = Array.isArray(requirement) ? requirement : [requirement];
+  return ranges.some((range) => typeof range === 'string' && semver.valid(version) && semver.validRange(range) && semver.satisfies(version, range, { includePrerelease: true }));
+}
+
 function addBuffer(zip, value, name) {
   zip.addBuffer(Buffer.isBuffer(value) ? value : Buffer.from(value), name);
 }
@@ -297,6 +302,10 @@ export function createProfiles(config) {
         if (!requirement) issues.push({ level: 'warn', mod: mod.name, message: 'Minecraft compatibility is not declared' });
         else if (typeof requirement === 'string' && semver.valid(profile.minecraftVersion) && semver.validRange(requirement) && !semver.satisfies(profile.minecraftVersion, requirement, { includePrerelease: true })) {
           issues.push({ level: 'block', mod: mod.name, message: `Declares Minecraft requirement ${requirement}` });
+        }
+        const loaderRequirement = mod.metadata?.depends?.fabricloader;
+        if (loaderRequirement && !satisfiesVersionRequirement(config.fabricLoaderVersion, loaderRequirement)) {
+          issues.push({ level: 'block', mod: mod.name, message: `Requires Fabric Loader ${Array.isArray(loaderRequirement) ? loaderRequirement.join(' or ') : loaderRequirement}; configured ${config.fabricLoaderVersion}` });
         }
       }
       if (mod.source === 'modrinth') {

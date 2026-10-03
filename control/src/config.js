@@ -34,7 +34,7 @@ export function loadConfig() {
     valheimContainer: safeContainer('VALHEIM_CONTAINER', 'valheim'),
     minecraftContainer: safeContainer('MINECRAFT_CONTAINER', 'minecraft'),
     minecraftVersion: process.env.MINECRAFT_VERSION?.trim() || '1.21.1',
-    fabricLoaderVersion: process.env.FABRIC_LOADER_VERSION?.trim() || '0.16.10',
+    fabricLoaderVersion: process.env.FABRIC_LOADER_VERSION?.trim() || '0.19.5',
     profileName: process.env.MINECRAFT_PROFILE_NAME?.trim() || 'Dapex Fabric',
     curseForgeApiKey: process.env.CURSEFORGE_API_KEY?.trim() || null,
     maxUploadBytes: integer('MAX_UPLOAD_MIB', 512) * 1024 * 1024,
