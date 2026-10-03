@@ -151,22 +151,92 @@ $('#mod-list').addEventListener('click', async (event) => {
 });
 
 const fileInput = $('#file-upload');
+const uploadQueue = [];
+let activeUploads = 0;
+let uploadSequence = 0;
+const uploadConcurrency = 2;
 $('#browse-button').addEventListener('click', () => fileInput.click());
 $('#drop-zone').addEventListener('dragover', (event) => { event.preventDefault(); event.currentTarget.classList.add('dragging'); });
 $('#drop-zone').addEventListener('dragleave', (event) => event.currentTarget.classList.remove('dragging'));
-$('#drop-zone').addEventListener('drop', (event) => { event.preventDefault(); event.currentTarget.classList.remove('dragging'); uploadFile(event.dataTransfer.files[0]); });
-fileInput.addEventListener('change', () => uploadFile(fileInput.files[0]));
+$('#drop-zone').addEventListener('drop', (event) => { event.preventDefault(); event.currentTarget.classList.remove('dragging'); enqueueUploads(event.dataTransfer.files); });
+fileInput.addEventListener('change', () => { enqueueUploads(fileInput.files); fileInput.value = ''; });
+$('#upload-clear').addEventListener('click', () => {
+  for (let index = uploadQueue.length - 1; index >= 0; index -= 1) {
+    if (['complete', 'error'].includes(uploadQueue[index].status)) uploadQueue.splice(index, 1);
+  }
+  renderUploadQueue();
+});
 
-async function uploadFile(file) {
-  if (!file) return;
-  const form = new FormData();
-  form.append('file', file);
-  try {
-    const response = await fetch('/api/admin/upload', { method: 'POST', body: form });
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.error);
-    await refresh(); toast(`${file.name} inspected and staged`);
-  } catch (error) { toast(error.message, true); }
+function enqueueUploads(files) {
+  const incoming = Array.from(files || []);
+  if (!incoming.length) return;
+  for (const file of incoming) {
+    const extension = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')).toLowerCase() : '';
+    uploadQueue.push({ id: ++uploadSequence, file, status: ['.jar', '.mrpack', '.zip'].includes(extension) ? 'queued' : 'error', progress: 0, error: ['.jar', '.mrpack', '.zip'].includes(extension) ? '' : 'Only JAR, MRPACK, and ZIP files are accepted' });
+  }
+  renderUploadQueue();
+  pumpUploadQueue();
+}
+
+function renderUploadQueue() {
+  const panel = $('#upload-queue');
+  panel.hidden = uploadQueue.length === 0;
+  if (!uploadQueue.length) return;
+  const complete = uploadQueue.filter((item) => item.status === 'complete').length;
+  const failed = uploadQueue.filter((item) => item.status === 'error').length;
+  const pending = uploadQueue.length - complete - failed;
+  $('#upload-summary').textContent = pending ? `${pending} processing · ${complete} staged${failed ? ` · ${failed} failed` : ''}` : `${complete} staged${failed ? ` · ${failed} failed` : ''}`;
+  $('#upload-items').innerHTML = uploadQueue.map((item) => `<article class="upload-item ${item.status}">
+    <span class="upload-state">${item.status === 'complete' ? '✓' : item.status === 'error' ? '!' : item.status === 'uploading' ? '↑' : '·'}</span>
+    <div><strong>${escapeHtml(item.file.name)}</strong><small>${escapeHtml(item.error || `${bytes(item.file.size)} · ${item.status === 'queued' ? 'waiting' : item.status}`)}</small><i><span style="width:${item.progress}%"></span></i></div>
+    <b>${item.status === 'uploading' ? `${item.progress}%` : item.status}</b>
+  </article>`).join('');
+}
+
+function uploadQueuedFile(item) {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append('file', item.file);
+    const request = new XMLHttpRequest();
+    request.open('POST', '/api/admin/upload');
+    request.upload.addEventListener('progress', (event) => {
+      if (!event.lengthComputable) return;
+      item.progress = Math.round((event.loaded / event.total) * 100);
+      renderUploadQueue();
+    });
+    request.addEventListener('load', () => {
+      let body = {};
+      try { body = JSON.parse(request.responseText || '{}'); } catch {}
+      if (request.status >= 200 && request.status < 300) resolve(body);
+      else reject(new Error(body.error || `Upload failed (${request.status})`));
+    });
+    request.addEventListener('error', () => reject(new Error('Network error while uploading')));
+    request.send(form);
+  });
+}
+
+function pumpUploadQueue() {
+  while (activeUploads < uploadConcurrency) {
+    const item = uploadQueue.find((candidate) => candidate.status === 'queued');
+    if (!item) break;
+    activeUploads += 1;
+    item.status = 'uploading';
+    renderUploadQueue();
+    uploadQueuedFile(item).then(() => {
+      item.status = 'complete'; item.progress = 100;
+    }).catch((error) => {
+      item.status = 'error'; item.error = error.message || 'Upload failed';
+    }).finally(async () => {
+      activeUploads -= 1;
+      renderUploadQueue();
+      pumpUploadQueue();
+      if (activeUploads === 0 && !uploadQueue.some((candidate) => candidate.status === 'queued')) {
+        try { await refresh(); } catch (error) { toast(error.message, true); }
+        const failures = uploadQueue.filter((candidate) => candidate.status === 'error').length;
+        toast(failures ? `Batch finished with ${failures} failed file${failures === 1 ? '' : 's'}` : 'All files inspected and staged', failures > 0);
+      }
+    });
+  }
 }
 
 $('#minecraft-version').addEventListener('change', async (event) => {

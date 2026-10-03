@@ -118,6 +118,7 @@ export function createProfiles(config) {
   const activeFile = path.join(profileDir, 'active.json');
   const uploadDir = path.join(profileDir, 'uploads');
   const releasesDir = path.join(profileDir, 'releases');
+  let uploadMutation = Promise.resolve();
 
   async function active() {
     return readJson(activeFile, initialProfile(config));
@@ -171,7 +172,7 @@ export function createProfiles(config) {
     return saveDraft(current);
   }
 
-  async function importUpload(file, originalName, actor) {
+  async function importUploadUnlocked(file, originalName, actor) {
     const extension = path.extname(originalName).toLowerCase();
     if (!allowedExtensions.has(extension)) throw new Error('Only .jar, .mrpack, and .zip uploads are accepted');
     if (!(await hasZipMagic(file))) throw new Error('Uploaded file is not a valid ZIP/JAR archive');
@@ -215,6 +216,12 @@ export function createProfiles(config) {
       addedAt: new Date().toISOString(),
     });
     return saveDraft(current);
+  }
+
+  async function importUpload(file, originalName, actor) {
+    const result = uploadMutation.then(() => importUploadUnlocked(file, originalName, actor));
+    uploadMutation = result.catch(() => {});
+    return result;
   }
 
   function compatibility(profile) {

@@ -52,6 +52,22 @@ test('publishes uploaded Fabric jars into server mods and an importable MRPACK',
   assert.equal(await profile.manualPackFile(99), null);
 });
 
+test('serializes concurrent uploads so every file remains in the draft', async () => {
+  const { deployDir, profile } = await fixture();
+  const first = path.join(deployDir, 'first.jar');
+  const second = path.join(deployDir, 'second.jar');
+  await Promise.all([
+    createZip(first, { 'fabric.mod.json': JSON.stringify({ id: 'first', name: 'First', version: '1.0.0', environment: '*' }) }),
+    createZip(second, { 'fabric.mod.json': JSON.stringify({ id: 'second', name: 'Second', version: '1.0.0', environment: '*' }) }),
+  ]);
+  await Promise.all([
+    profile.importUpload(first, 'first.jar', 'test@example.com'),
+    profile.importUpload(second, 'second.jar', 'test@example.com'),
+  ]);
+  const draft = await profile.draft();
+  assert.deepEqual(draft.mods.map((mod) => mod.name).sort(), ['First', 'Second']);
+});
+
 test('blocks a CurseForge pack archive instead of silently publishing an incomplete release', async () => {
   const { deployDir, profile } = await fixture();
   const upload = path.join(deployDir, 'pack.zip');
