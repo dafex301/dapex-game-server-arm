@@ -13,6 +13,7 @@ import { createProfiles } from './profiles.js';
 import { minecraftWhitelist } from './docker.js';
 import { createManagement } from './management.js';
 import { createFileExplorer } from './file-explorer.js';
+import { run } from './process.js';
 
 const config = loadConfig();
 const orchestrator = createOrchestrator(config);
@@ -169,9 +170,14 @@ app.post('/api/admin/version', asyncRoute(async (request, response) => {
   response.json(await profiles.setVersion(version));
 }));
 app.post('/api/admin/publish', asyncRoute(async (request, response) => {
-  const status = await orchestrator.status();
-  if (status.active === 'minecraft') throw new Error('Stop or switch away from Minecraft before publishing a profile');
-  response.status(201).json(await profiles.publish(request.actor));
+  const helper = path.join(config.deployDir, 'control', 'src', 'publish-cli.js');
+  const output = await run('flock', ['-w', '900', config.operationLock, process.execPath, helper, request.actor], {
+    cwd: config.deployDir,
+    env: process.env,
+    timeout: 960_000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  response.status(201).json(JSON.parse(output));
 }));
 app.get('/api/admin/minecraft/whitelist', asyncRoute(async (_request, response) => {
   await requireMinecraftReady();

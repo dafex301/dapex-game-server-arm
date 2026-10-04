@@ -117,7 +117,7 @@ export function createOrchestrator(config, dependencies = defaultDependencies) {
 
   async function switchGame(target, actor) {
     const helper = path.join(config.deployDir, 'control', 'src', 'switch-cli.js');
-    const output = await dependencies.run('flock', ['-w', '10', config.operationLock, process.execPath, helper, target, actor || 'api'], {
+    const output = await dependencies.run('flock', ['-w', '900', config.operationLock, process.execPath, helper, target, actor || 'api'], {
       cwd: config.deployDir,
       env: process.env,
       timeout: 960_000,
