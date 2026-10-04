@@ -1,9 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { inspectContainerResult, minecraftWhitelist } from '../src/docker.js';
+import { inspectContainerResult, minecraftCommand, minecraftWhitelist } from '../src/docker.js';
 
 test('treats Docker 29 empty inspect arrays as a missing container', () => {
   assert.deepEqual(inspectContainerResult('minecraft', '[]'), { name: 'minecraft', exists: false, running: false });
+});
+
+test('passes an RCON command as one Docker argument without invoking a shell', async () => {
+  let call;
+  const output = await minecraftCommand('minecraft', 'give D_Apex minecraft:diamond 64', async (file, args, options) => {
+    call = { file, args, options };
+    return 'Gave 64 diamond to D_Apex';
+  });
+  assert.equal(output, 'Gave 64 diamond to D_Apex');
+  assert.deepEqual(call.args, ['exec', 'minecraft', 'rcon-cli', 'give D_Apex minecraft:diamond 64']);
 });
 
 test('turns an unavailable RCON socket into a useful readiness error', async () => {

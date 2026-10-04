@@ -63,3 +63,16 @@ export async function minecraftWhitelist(container, action = 'list', username = 
     throw error;
   }
 }
+
+export async function minecraftCommand(container, command, runCommand = run) {
+  try {
+    return await runCommand('docker', ['exec', container, 'rcon-cli', command], { timeout: 30_000 });
+  } catch (error) {
+    if (/failed to connect to rcon|connect(?:ion)? refused/i.test(error.message || '')) {
+      const readinessError = new Error('Minecraft is still starting. Wait until it shows healthy, then run the command again.');
+      readinessError.status = 409;
+      throw readinessError;
+    }
+    throw error;
+  }
+}

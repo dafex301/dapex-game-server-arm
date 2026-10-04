@@ -19,6 +19,8 @@ Cloudflare Access policy. Never publish port 8787 directly.
   disk-reserve reporting, and backup-first world replacement.
 - a Minecraft-only file explorer for curated configuration, datapack, resource
   pack, world, log, and crash-report areas.
+- an authenticated RCON command console beside live logs, with actor/output
+  audit history and lifecycle commands kept behind the game switcher.
 
 Modrinth mods are downloaded over HTTPS and verified against the recorded
 SHA-512 before being placed in the server profile. Uploaded JARs and packs are
@@ -53,6 +55,12 @@ creates a verified snapshot before the change. Only `config`, the active world's
 are read-only; dotfiles, symlinks, secrets, whitelist/operator data, and
 `server.properties` are hidden and blocked. Mods remain managed by Mod Workshop
 so the server manifest and player MRPACK cannot silently drift apart.
+
+The live-log console can run a single Minecraft command through RCON while the
+container is healthy. Commands are passed directly to `rcon-cli` without a
+shell and recorded with the Cloudflare Access identity and returned output.
+`stop` and `save-off` are rejected: use Maintenance for lifecycle control and
+keep world saving enabled for reliable snapshots.
 
 ## Host installation
 

@@ -14,12 +14,14 @@ import { minecraftWhitelist } from './docker.js';
 import { createManagement } from './management.js';
 import { createFileExplorer } from './file-explorer.js';
 import { run } from './process.js';
+import { createRconConsole } from './rcon-console.js';
 
 const config = loadConfig();
 const orchestrator = createOrchestrator(config);
 const profiles = createProfiles(config);
 const management = createManagement(config);
 const explorer = createFileExplorer(config, management);
+const rconConsole = createRconConsole(config);
 const app = express();
 const uploadDir = path.join(config.stateDir, 'incoming');
 await mkdir(uploadDir, { recursive: true });
@@ -45,6 +47,7 @@ const worldSchema = z.object({
 });
 const directorySchema = z.object({ path: z.string().min(1).max(512) });
 const logQuerySchema = z.object({ lines: z.coerce.number().int().min(50).max(500).default(250) });
+const commandSchema = z.object({ command: z.string().min(1).max(512) });
 
 async function requireMinecraftReady() {
   const status = await orchestrator.status();
@@ -202,6 +205,12 @@ app.get('/api/admin/management', asyncRoute(async (_request, response) => respon
 app.get('/api/admin/logs/latest', asyncRoute(async (request, response) => {
   const { lines } = logQuerySchema.parse(request.query);
   response.json(await explorer.latestLog(lines));
+}));
+app.get('/api/admin/minecraft/commands', asyncRoute(async (_request, response) => response.json({ entries: await rconConsole.history() })));
+app.post('/api/admin/minecraft/commands', asyncRoute(async (request, response) => {
+  await requireMinecraftReady();
+  const { command } = commandSchema.parse(request.body);
+  response.status(201).json(await rconConsole.execute(command, request.actor));
 }));
 app.post('/api/admin/backups', asyncRoute(async (_request, response) => response.status(201).json(await management.backup())));
 app.patch('/api/admin/minecraft/settings', asyncRoute(async (request, response) => {

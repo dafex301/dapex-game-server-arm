@@ -1,4 +1,4 @@
-const state = { payload: null, management: null, busy: false, files: { scope: 'config', path: '', listing: null, editing: null, tree: {} }, logs: { payload: null, filter: 'all', follow: true, busy: false } };
+const state = { payload: null, management: null, busy: false, files: { scope: 'config', path: '', listing: null, editing: null, tree: {} }, logs: { payload: null, commands: [], filter: 'all', follow: true, busy: false, commandBusy: false } };
 let whitelistLoaded = false;
 const $ = (selector) => document.querySelector(selector);
 const fileScopes = [
@@ -66,6 +66,10 @@ function render() {
   $('#interlock').className = status.invariantOk ? 'good' : 'bad';
   $('#rail-status').textContent = `${status.active.toUpperCase()} ONLINE`;
   document.querySelectorAll('[data-game]').forEach((button) => button.classList.toggle('active', button.dataset.game === status.active));
+  const commandReady = status.active === 'minecraft' && status.containers.minecraft.running && status.containers.minecraft.health === 'healthy';
+  $('#command-input').disabled = !commandReady;
+  $('#command-form button').disabled = !commandReady || state.logs.commandBusy;
+  $('#command-input').placeholder = commandReady ? 'time set day, list, give D_Apex minecraft:diamond 64…' : 'Start Minecraft and wait until it is healthy';
   $('#release-badge').textContent = `v${active.release} active · draft`;
   $('#profile-name').textContent = draft.name;
   $('#minecraft-version').value = draft.minecraftVersion;
@@ -133,6 +137,17 @@ async function refreshLatestLog() {
   try { state.logs.payload = await api('/api/admin/logs/latest?lines=500'); renderLogs(); }
   catch (error) { $('#log-lines').innerHTML = `<div class="log-zero error">${escapeHtml(error.message)}</div>`; throw error; }
   finally { state.logs.busy = false; }
+}
+
+function renderCommandHistory() {
+  const entries = state.logs.commands;
+  $('#command-history').innerHTML = entries.length ? entries.map((entry) => `<article class="command-entry ${entry.ok ? 'success' : 'failed'}"><div><time>${new Date(entry.startedAt).toLocaleTimeString()}</time><code>&gt; ${escapeHtml(entry.command)}</code><small>${escapeHtml(entry.actor)}</small></div><pre>${escapeHtml(entry.output)}</pre></article>`).join('') : '<div class="command-empty">No web commands in recent history.</div>';
+}
+
+async function refreshCommandHistory() {
+  const payload = await api('/api/admin/minecraft/commands');
+  state.logs.commands = payload.entries || [];
+  renderCommandHistory();
 }
 
 async function waitForOperation(id) {
@@ -488,6 +503,31 @@ $('#log-follow').addEventListener('click', (event) => {
   event.currentTarget.textContent = state.logs.follow ? '● Live' : '○ Paused';
   if (state.logs.follow) refreshLatestLog().catch((error) => toast(error.message, true));
 });
+$('#command-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const input = $('#command-input');
+  const command = input.value.trim();
+  if (!command || state.logs.commandBusy) return;
+  state.logs.commandBusy = true;
+  input.disabled = true;
+  $('#command-form button').disabled = true;
+  try {
+    const result = await api('/api/admin/minecraft/commands', { method: 'POST', body: JSON.stringify({ command }) });
+    input.value = '';
+    state.logs.commands.unshift(result);
+    state.logs.commands = state.logs.commands.slice(0, 30);
+    renderCommandHistory();
+    await refreshLatestLog();
+    toast(result.output || 'Command completed');
+  } catch (error) {
+    await refreshCommandHistory().catch(() => {});
+    toast(error.message, true);
+  } finally {
+    state.logs.commandBusy = false;
+    render();
+    if (!input.disabled) input.focus();
+  }
+});
 
 const sections = [...document.querySelectorAll('.section-block')];
 const navLinks = [...document.querySelectorAll('.sidebar nav a')];
@@ -498,6 +538,6 @@ const sectionObserver = new IntersectionObserver((entries) => {
 }, { rootMargin: '-35% 0px -55%' });
 sections.forEach((section) => sectionObserver.observe(section));
 
-Promise.allSettled([refresh(), refreshFiles(), refreshLatestLog()]).then((results) => results.filter((result) => result.status === 'rejected').forEach((result) => toast(result.reason.message, true)));
+Promise.allSettled([refresh(), refreshFiles(), refreshLatestLog(), refreshCommandHistory()]).then((results) => results.filter((result) => result.status === 'rejected').forEach((result) => toast(result.reason.message, true)));
 setInterval(() => refresh().catch(() => {}), 30_000);
-setInterval(() => { if (state.logs.follow) refreshLatestLog().catch(() => {}); }, 5_000);
+setInterval(() => { if (state.logs.follow) Promise.allSettled([refreshLatestLog(), refreshCommandHistory()]); }, 5_000);
