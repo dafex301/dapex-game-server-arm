@@ -26,6 +26,8 @@ test('backs up before replacing a world and recreates the container configuratio
   await writeFile(path.join(root, 'minecraft', '.env'), 'LEVEL=world\nRCON_PASSWORD=secret\n');
   const calls = [];
   const management = createManagement({ deployDir: root, minecraftContainer: 'minecraft' }, { run: async (command, args = []) => { calls.push([command, ...args]); return 'backups/minecraft/safe.tar.gz\n'; } });
+  await assert.rejects(management.resetWorld({ name: 'season two', seed: 'dapex' }), /safe filename characters/);
+  assert.equal(calls.length, 0);
   const result = await management.resetWorld({ name: 'season-2', seed: 'dapex' });
   await assert.rejects(access(path.join(root, 'minecraft', 'data', 'world')));
   const environment = await readFile(path.join(root, 'minecraft', '.env'), 'utf8');

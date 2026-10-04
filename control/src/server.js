@@ -38,7 +38,10 @@ const addSchema = z.object({ source: z.literal('modrinth'), projectId: z.string(
 const versionSchema = z.object({ version: z.string().regex(/^\d+\.\d+(?:\.\d+)?$/) });
 const switchSchema = z.object({ target: z.enum(['valheim', 'minecraft', 'none']) });
 const whitelistSchema = z.object({ username: z.string().regex(/^[A-Za-z0-9_]{3,16}$/) });
-const worldSchema = z.object({ name: z.string().trim().min(1).max(64), seed: z.string().max(128).optional().default('') });
+const worldSchema = z.object({
+  name: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, 'World name must start with a letter or number and use only letters, numbers, dot, dash, or underscore'),
+  seed: z.string().max(128).optional().default(''),
+});
 const directorySchema = z.object({ path: z.string().min(1).max(512) });
 const logQuerySchema = z.object({ lines: z.coerce.number().int().min(50).max(500).default(250) });
 

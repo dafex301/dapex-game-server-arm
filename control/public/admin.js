@@ -1,6 +1,14 @@
-const state = { payload: null, management: null, busy: false, files: { scope: 'config', path: '', listing: null, editing: null }, logs: { payload: null, filter: 'all', follow: true, busy: false } };
+const state = { payload: null, management: null, busy: false, files: { scope: 'config', path: '', listing: null, editing: null, tree: {} }, logs: { payload: null, filter: 'all', follow: true, busy: false } };
 let whitelistLoaded = false;
 const $ = (selector) => document.querySelector(selector);
+const fileScopes = [
+  { name: 'config', label: 'config', group: 'MINECRAFT' },
+  { name: 'datapacks', label: 'datapacks', group: 'MINECRAFT' },
+  { name: 'resourcepacks', label: 'resourcepacks', group: 'MINECRAFT' },
+  { name: 'world', label: 'world', group: 'READ ONLY', muted: true },
+  { name: 'logs', label: 'logs', group: 'READ ONLY', muted: true },
+  { name: 'crashes', label: 'crash-reports', group: 'READ ONLY', muted: true },
+];
 
 async function api(url, options = {}) {
   const response = await fetch(url, { ...options, headers: { 'Content-Type': 'application/json', ...options.headers } });
@@ -21,6 +29,25 @@ function modKey(mod) { return `${mod.source}:${mod.projectId || mod.sha256}`; }
 function sideLabel(side) { return typeof side === 'object' && side ? `client:${side.client || '?'} / server:${side.server || '?'}` : String(side || 'unknown'); }
 function bytes(value) { return value >= 1024 ** 3 ? `${(value / 1024 ** 3).toFixed(1)} GiB` : value >= 1024 ** 2 ? `${(value / 1024 ** 2).toFixed(1)} MiB` : value >= 1024 ? `${(value / 1024).toFixed(1)} KiB` : `${value} B`; }
 function filePath(name = '') { return [state.files.path, name].filter(Boolean).join('/'); }
+function renderTreeChildren(scope, parent = '', depth = 0) {
+  const children = state.files.tree[scope]?.[parent];
+  if (!children?.length) return '';
+  return `<div class="tree-branch">${children.map((name) => {
+    const childPath = [parent, name].filter(Boolean).join('/');
+    const onPath = state.files.scope === scope && (state.files.path === childPath || state.files.path.startsWith(`${childPath}/`));
+    const loaded = Object.hasOwn(state.files.tree[scope] || {}, childPath);
+    return `<button class="tree-node child${state.files.scope === scope && state.files.path === childPath ? ' active' : ''}" style="--tree-depth:${depth + 1}" data-tree-scope="${scope}" data-tree-path="${encodeURIComponent(childPath)}"><span>${onPath || loaded ? '▾' : '▸'}</span><i class="folder-icon${fileScopes.find((item) => item.name === scope)?.muted ? ' muted' : ''}"></i><em>${escapeHtml(name)}</em></button>${onPath || loaded ? renderTreeChildren(scope, childPath, depth + 1) : ''}`;
+  }).join('')}</div>`;
+}
+function renderFileTree() {
+  let group = '';
+  $('#file-tree').innerHTML = fileScopes.map((scope) => {
+    const heading = scope.group === group ? '' : `<div class="tree-heading${group ? ' secondary' : ''}">${scope.group}</div>`;
+    group = scope.group;
+    const selected = state.files.scope === scope.name;
+    return `${heading}<button class="tree-node${selected && !state.files.path ? ' active' : ''}" data-tree-scope="${scope.name}" data-tree-path=""><span>${selected ? '▾' : '▸'}</span><i class="folder-icon${scope.muted ? ' muted' : ''}"></i><em>${scope.label}</em></button>${selected ? renderTreeChildren(scope.name) : ''}`;
+  }).join('');
+}
 function fileTypeIcon(name) {
   const extension = name.split('.').pop()?.toLowerCase();
   if (extension === 'json' || extension === 'json5') return '<i class="file-type-icon json">{ }</i>';
@@ -336,14 +363,15 @@ $('#settings-form').addEventListener('submit', async (event) => {
 
 $('#world-reset-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  const values = Object.fromEntries(new FormData(event.currentTarget));
+  const form = event.currentTarget;
+  const values = Object.fromEntries(new FormData(form));
   const current = state.management?.world?.name || 'world';
   if (!confirm(`Create "${values.name}" and replace the live world "${current}"? A verified backup is created first.`)) return;
   const confirmation = prompt(`Type the current world name (${current}) to continue:`);
   if (confirmation !== current) return toast('World name did not match; nothing changed', true);
   try {
     state.management = await api('/api/admin/world/reset', { method: 'POST', body: JSON.stringify(values) });
-    event.currentTarget.reset(); render(); toast(`World ${values.name} is ready for the next Minecraft start`);
+    form.reset(); render(); toast(`World ${values.name} is ready for the next Minecraft start`);
   } catch (error) { toast(error.message, true); }
 });
 
@@ -354,15 +382,15 @@ async function refreshFiles() {
     const listing = await api(`/api/admin/files?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}`);
     state.files.listing = listing;
     document.querySelectorAll('[data-file-scope]').forEach((node) => node.classList.toggle('active', node.dataset.fileScope === scope));
-    const activeTreeNode = document.querySelector(`[data-file-scope="${scope}"]`);
     const segments = path.split('/').filter(Boolean);
     $('#file-breadcrumb').innerHTML = [`<button data-crumb="">${escapeHtml(scope)}</button>`, ...segments.map((segment, index) => `<span>›</span><button data-crumb="${encodeURIComponent(segments.slice(0, index + 1).join('/'))}">${escapeHtml(segment)}</button>`)].join('');
     $('#file-scope-note').textContent = `${listing.description}${listing.writable ? ' · writable while Minecraft is offline' : ' · read-only'}`;
     $('#file-item-count').textContent = `${listing.entries.length} item${listing.entries.length === 1 ? '' : 's'}`;
     $('#file-upload-button').disabled = !listing.writable;
     $('#file-new-folder').disabled = !listing.writable;
-    $('#file-tree-children').innerHTML = listing.entries.filter((entry) => entry.type === 'directory').map((entry) => `<button class="tree-node child" data-tree-folder="${encodeURIComponent(entry.name)}"><span>›</span><i class="folder-icon"></i>${escapeHtml(entry.name)}</button>`).join('');
-    activeTreeNode?.insertAdjacentElement('afterend', $('#file-tree-children'));
+    state.files.tree[scope] ||= {};
+    state.files.tree[scope][path] = listing.entries.filter((entry) => entry.type === 'directory').map((entry) => entry.name);
+    renderFileTree();
     $('#file-list').innerHTML = listing.entries.length ? listing.entries.map((entry) => {
       const relative = filePath(entry.name);
       const download = `/api/admin/files/download?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(relative)}`;
@@ -375,19 +403,17 @@ async function refreshFiles() {
   }
 }
 
-document.querySelectorAll('[data-file-scope]').forEach((node) => node.addEventListener('click', async () => {
-  state.files.scope = node.dataset.fileScope; state.files.path = ''; state.files.editing = null; $('#file-editor').hidden = true;
+$('#file-tree').addEventListener('click', async (event) => {
+  const node = event.target.closest('[data-tree-scope]'); if (!node) return;
+  state.files.scope = node.dataset.treeScope;
+  state.files.path = decodeURIComponent(node.dataset.treePath || '');
+  state.files.editing = null; $('#file-editor').hidden = true;
   try { await refreshFiles(); } catch (error) { toast(error.message, true); }
-}));
+});
 
 $('#file-breadcrumb').addEventListener('click', async (event) => {
   const crumb = event.target.closest('[data-crumb]'); if (!crumb) return;
   state.files.path = decodeURIComponent(crumb.dataset.crumb); await refreshFiles().catch((error) => toast(error.message, true));
-});
-
-$('#file-tree-children').addEventListener('click', async (event) => {
-  const folder = event.target.closest('[data-tree-folder]'); if (!folder) return;
-  state.files.path = filePath(decodeURIComponent(folder.dataset.treeFolder)); await refreshFiles().catch((error) => toast(error.message, true));
 });
 
 $('#file-up').addEventListener('click', async () => {
