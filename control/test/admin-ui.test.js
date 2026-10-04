@@ -34,11 +34,15 @@ test('offers keyboard command completion with player-aware suggestions', async (
 
   assert.match(html, /id="command-suggestions"/);
   assert.match(script, /const commandCatalog = \[/);
+  assert.match(script, /const attributeIds = \[/);
   assert.match(script, /attribute <player> minecraft:<attribute> base set <value>/);
   assert.match(script, /template\.replace\('<player>', player\)/);
-  assert.match(script, /raw\.startsWith\('\/'\) \? raw : `say \$\{raw\}`/);
+  assert.match(script, /item\.value\.replace\('minecraft:<attribute>', attribute\)/);
+  assert.match(script, /raw\.startsWith\('\/'\) \? raw : `tellraw @a \$\{JSON\.stringify/);
+  assert.match(script, /\[Tuhan] \$\{raw\}/);
   assert.match(script, /raw\.startsWith\('\/'\)/);
   assert.match(script, /event\.key === 'Tab' \|\| event\.key === 'Enter'/);
+  assert.match(script, /navigateCommandHistory\(event\.key === 'ArrowUp' \? 1 : -1\)/);
   assert.match(style, /\.command-suggestions button\.active/);
   assert.match(style, /\.command-suggestions code,[^}]+display:block!important/);
 });

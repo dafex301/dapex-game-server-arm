@@ -1,6 +1,17 @@
-const state = { payload: null, management: null, busy: false, whitelist: [], files: { scope: 'config', path: '', listing: null, editing: null, tree: {} }, logs: { payload: null, commands: [], filter: 'all', follow: true, busy: false, commandBusy: false, suggestions: [], selectedSuggestion: 0 } };
+const state = { payload: null, management: null, busy: false, whitelist: [], files: { scope: 'config', path: '', listing: null, editing: null, tree: {} }, logs: { payload: null, commands: [], filter: 'all', follow: true, busy: false, commandBusy: false, suggestions: [], selectedSuggestion: 0, historyIndex: -1, historyDraft: '' } };
 let whitelistLoaded = false;
 const $ = (selector) => document.querySelector(selector);
+// Generated from Mojang's official Minecraft 1.21.1 server data report (minecraft:attribute registry).
+const attributeIds = [
+  'minecraft:generic.armor', 'minecraft:generic.armor_toughness', 'minecraft:generic.attack_damage', 'minecraft:generic.attack_knockback',
+  'minecraft:generic.attack_speed', 'minecraft:generic.burning_time', 'minecraft:generic.explosion_knockback_resistance', 'minecraft:generic.fall_damage_multiplier',
+  'minecraft:generic.flying_speed', 'minecraft:generic.follow_range', 'minecraft:generic.gravity', 'minecraft:generic.jump_strength',
+  'minecraft:generic.knockback_resistance', 'minecraft:generic.luck', 'minecraft:generic.max_absorption', 'minecraft:generic.max_health',
+  'minecraft:generic.movement_efficiency', 'minecraft:generic.movement_speed', 'minecraft:generic.oxygen_bonus', 'minecraft:generic.safe_fall_distance',
+  'minecraft:generic.scale', 'minecraft:generic.step_height', 'minecraft:generic.water_movement_efficiency', 'minecraft:player.block_break_speed',
+  'minecraft:player.block_interaction_range', 'minecraft:player.entity_interaction_range', 'minecraft:player.mining_efficiency', 'minecraft:player.sneaking_speed',
+  'minecraft:player.submerged_mining_speed', 'minecraft:player.sweeping_damage_ratio', 'minecraft:zombie.spawn_reinforcements',
+];
 const commandCatalog = [
   ['advancement grant <player> everything', 'Grant all advancements'], ['advancement revoke <player> everything', 'Revoke all advancements'],
   ['attribute <player> minecraft:<attribute> get [scale]', 'Read an attribute value'], ['attribute <player> minecraft:<attribute> base get [scale]', 'Read an attribute base value'], ['attribute <player> minecraft:<attribute> base set <value>', 'Set an attribute base value'], ['attribute <player> minecraft:<attribute> base reset', 'Reset an attribute base value'], ['attribute <player> minecraft:<attribute> modifier remove <uuid>', 'Remove an attribute modifier'],
@@ -12,10 +23,10 @@ const commandCatalog = [
   ['gamemode survival <player>', 'Set player to survival'], ['gamemode creative <player>', 'Set player to creative'], ['gamemode adventure <player>', 'Set player to adventure'], ['gamemode spectator <player>', 'Set player to spectator'],
   ['gamerule keepInventory true', 'Keep inventory after death'], ['gamerule keepInventory false', 'Drop inventory after death'], ['gamerule doDaylightCycle true', 'Enable day cycle'], ['gamerule doDaylightCycle false', 'Freeze day cycle'], ['gamerule doWeatherCycle true', 'Enable weather cycle'], ['gamerule doWeatherCycle false', 'Freeze weather cycle'], ['gamerule mobGriefing true', 'Allow mob block changes'], ['gamerule mobGriefing false', 'Prevent mob block changes'],
   ['give <player> minecraft:<item> [count]', 'Give an item'], ['help [command]', 'Show server command help'], ['item replace entity <player> <slot> with minecraft:<item>', 'Replace an inventory slot'], ['jfr start', 'Start Java Flight Recorder'], ['kick <player> [reason]', 'Disconnect a player'], ['kill <player>', 'Kill a player'], ['list', 'Show online players'], ['locate structure minecraft:<structure>', 'Find the nearest structure'], ['locate biome minecraft:<biome>', 'Find the nearest biome'], ['loot give <player> loot minecraft:<loot_table>', 'Give loot-table items'],
-  ['me <action>', 'Broadcast an action message'], ['msg <player> <message>', 'Send a private message'], ['op <player>', 'Grant operator access'], ['pardon <player>', 'Remove a player ban'], ['pardon-ip <address>', 'Remove an IP ban'], ['particle minecraft:<particle> [pos] [delta] [speed] [count]', 'Spawn particles'], ['place structure minecraft:<structure>', 'Place a configured structure'], ['playsound minecraft:<sound> master <player>', 'Play a sound'], ['random value <min>..<max>', 'Generate a random number'], ['recipe give <player> *', 'Unlock all recipes'], ['reload', 'Reload data packs'], ['ride <player> dismount', 'Dismount an entity'],
+  ['me <action>', 'Broadcast an action message'], ['msg <player> <message>', 'Send a private message'], ['op <player>', 'Grant operator access'], ['pardon <player>', 'Remove a player ban'], ['pardon-ip <address>', 'Remove an IP ban'], ['particle minecraft:<particle> [pos] [delta] [speed] [count]', 'Spawn particles'], ['perf start', 'Start a server performance recording'], ['place structure minecraft:<structure>', 'Place a configured structure'], ['playsound minecraft:<sound> master <player>', 'Play a sound'], ['publish', 'Publish an integrated server'], ['random value <min>..<max>', 'Generate a random number'], ['recipe give <player> *', 'Unlock all recipes'], ['reload', 'Reload data packs'], ['return <value>', 'Return a value from a function'], ['ride <player> dismount', 'Dismount an entity'],
   ['save-all flush', 'Save world data now'], ['save-on', 'Enable automatic world saves'], ['say <message>', 'Broadcast a server message'], ['schedule function minecraft:<function> <time>', 'Schedule a data-pack function'], ['scoreboard objectives list', 'List scoreboard objectives'], ['seed', 'Show the current world seed'], ['setblock <pos> minecraft:<block>', 'Set one block'], ['setidletimeout <minutes>', 'Set idle kick timeout'], ['setworldspawn', 'Set world spawn here'], ['spawnpoint <player>', 'Set player spawn here'], ['spectate <target> <player>', 'Make a player spectate an entity'], ['spreadplayers <center> <distance> <maxRange> false <player>', 'Spread players around an area'], ['stopsound <player> [source] [sound]', 'Stop a playing sound'], ['summon minecraft:<entity> [pos]', 'Summon an entity'],
-  ['tag <player> list', 'List entity tags'], ['tag <player> add <name>', 'Add an entity tag'], ['team list', 'List scoreboard teams'], ['teammsg <message>', 'Message your team'], ['teleport <player> <target|x y z>', 'Teleport a player'], ['tellraw <player> <json>', 'Send a JSON chat message'], ['tick query', 'Show server tick status'], ['time set day', 'Set daytime'], ['time set night', 'Set nighttime'], ['time set noon', 'Set noon'], ['time set midnight', 'Set midnight'], ['title <player> title <json>', 'Show a title'], ['transfer <host> [port] <player>', 'Transfer players to another server'], ['trigger <objective> [add|set] [value]', 'Change a trigger score'],
-  ['weather clear', 'Clear the weather'], ['weather rain', 'Start rain'], ['weather thunder', 'Start a thunderstorm'], ['whitelist list', 'Show allowed players'], ['whitelist add <player>', 'Allow a player'], ['whitelist remove <player>', 'Remove an allowed player'], ['worldborder get', 'Show world-border size'], ['worldborder set <distance> [time]', 'Set world-border size'],
+  ['tag <player> list', 'List entity tags'], ['tag <player> add <name>', 'Add an entity tag'], ['team list', 'List scoreboard teams'], ['teammsg <message>', 'Message your team'], ['tell <player> <message>', 'Alias of msg'], ['teleport <player> <target|x y z>', 'Teleport a player'], ['tellraw <player> <json>', 'Send a JSON chat message'], ['tick query', 'Show server tick status'], ['time set day', 'Set daytime'], ['time set night', 'Set nighttime'], ['time set noon', 'Set noon'], ['time set midnight', 'Set midnight'], ['title <player> title <json>', 'Show a title'], ['tm <message>', 'Alias of teammsg'], ['tp <player> <target|x y z>', 'Alias of teleport'], ['transfer <host> [port] <player>', 'Transfer players to another server'], ['trigger <objective> [add|set] [value]', 'Change a trigger score'],
+  ['w <player> <message>', 'Alias of msg'], ['weather clear', 'Clear the weather'], ['weather rain', 'Start rain'], ['weather thunder', 'Start a thunderstorm'], ['whitelist list', 'Show allowed players'], ['whitelist add <player>', 'Allow a player'], ['whitelist remove <player>', 'Remove an allowed player'], ['worldborder get', 'Show world-border size'], ['worldborder set <distance> [time]', 'Set world-border size'], ['xp add <player> <amount> points', 'Alias of experience'],
 ];
 const fileScopes = [
   { name: 'config', label: 'config', group: 'MINECRAFT' },
@@ -157,14 +168,17 @@ async function refreshLatestLog() {
 
 function renderCommandHistory() {
   const entries = state.logs.commands;
-  $('#command-history').innerHTML = entries.length ? entries.map((entry) => `<article class="command-entry ${entry.ok ? 'success' : 'failed'}"><div><time>${new Date(entry.startedAt).toLocaleTimeString()}</time><code>&gt; ${escapeHtml(entry.command)}</code><small>${escapeHtml(entry.actor)}</small></div><pre>${escapeHtml(entry.output)}</pre></article>`).join('') : '<div class="command-empty">No web commands in recent history.</div>';
+  $('#command-history').innerHTML = entries.length ? entries.map((entry) => `<article class="command-entry ${entry.ok ? 'success' : 'failed'}"><div><time>${new Date(entry.startedAt).toLocaleTimeString()}</time><code>&gt; ${escapeHtml(commandInputValue(entry.command))}</code><small>${escapeHtml(entry.actor)}</small></div><pre>${escapeHtml(entry.output)}</pre></article>`).join('') : '<div class="command-empty">No web commands in recent history.</div>';
 }
 
 function availableCommandSuggestions() {
   const players = [...new Set([...state.whitelist, '@a', '@p'])];
-  const catalog = commandCatalog.flatMap(([template, description]) => template.includes('<player>')
+  const playerExpanded = commandCatalog.flatMap(([template, description]) => template.includes('<player>')
     ? players.map((player) => ({ value: template.replace('<player>', player), description }))
     : [{ value: template, description }]);
+  const catalog = playerExpanded.flatMap((item) => item.value.includes('minecraft:<attribute>')
+    ? attributeIds.map((attribute) => ({ ...item, value: item.value.replace('minecraft:<attribute>', attribute) }))
+    : [item]);
   const recent = state.logs.commands.map((entry) => ({ value: entry.command, description: 'Recent command' }));
   return [...new Map([...recent, ...catalog].map((item) => [item.value, item])).values()];
 }
@@ -199,6 +213,29 @@ function applyCommandSuggestion(index = state.logs.selectedSuggestion) {
   if (placeholder >= 0) input.setSelectionRange(placeholder, input.value.indexOf('>', placeholder) + 1);
   else input.setSelectionRange(input.value.length, input.value.length);
   return true;
+}
+
+function commandInputValue(command) {
+  if (!command.startsWith('tellraw @a ')) return `/${command}`;
+  try {
+    const message = JSON.parse(command.slice('tellraw @a '.length)).text;
+    return typeof message === 'string' && message.startsWith('[Tuhan] ') ? message.slice('[Tuhan] '.length) : message;
+  } catch { return `/${command}`; }
+}
+
+function commandInputHistory() {
+  return state.logs.commands.map((entry) => commandInputValue(entry.command));
+}
+
+function navigateCommandHistory(delta) {
+  const history = commandInputHistory();
+  if (!history.length) return;
+  const input = $('#command-input');
+  if (state.logs.historyIndex === -1) state.logs.historyDraft = input.value;
+  state.logs.historyIndex = Math.max(-1, Math.min(history.length - 1, state.logs.historyIndex + delta));
+  input.value = state.logs.historyIndex === -1 ? state.logs.historyDraft : history[state.logs.historyIndex];
+  input.setSelectionRange(input.value.length, input.value.length);
+  $('#command-suggestions').hidden = true;
 }
 
 async function refreshCommandHistory() {
@@ -566,13 +603,15 @@ $('#command-form').addEventListener('submit', async (event) => {
   const raw = input.value.trim();
   if (!raw || state.logs.commandBusy) return;
   if (/^\/+\s*$/.test(raw)) return toast('Type a command after /', true);
-  const command = raw.startsWith('/') ? raw : `say ${raw}`;
+  const command = raw.startsWith('/') ? raw : `tellraw @a ${JSON.stringify({ text: `[Tuhan] ${raw}`, color: 'light_purple' })}`;
   state.logs.commandBusy = true;
   input.disabled = true;
   $('#command-form button').disabled = true;
   try {
     const result = await api('/api/admin/minecraft/commands', { method: 'POST', body: JSON.stringify({ command }) });
     input.value = '';
+    state.logs.historyIndex = -1;
+    state.logs.historyDraft = '';
     state.logs.commands.unshift(result);
     state.logs.commands = state.logs.commands.slice(0, 30);
     renderCommandHistory();
@@ -587,17 +626,22 @@ $('#command-form').addEventListener('submit', async (event) => {
     if (!input.disabled) input.focus();
   }
 });
-$('#command-input').addEventListener('input', () => { state.logs.selectedSuggestion = 0; renderCommandSuggestions(); });
+$('#command-input').addEventListener('input', () => { state.logs.selectedSuggestion = 0; state.logs.historyIndex = -1; state.logs.historyDraft = ''; renderCommandSuggestions(); });
 $('#command-input').addEventListener('focus', renderCommandSuggestions);
 $('#command-input').addEventListener('keydown', (event) => {
-  if (!state.logs.suggestions.length || $('#command-suggestions').hidden) return;
+  const suggestionsOpen = state.logs.suggestions.length > 0 && !$('#command-suggestions').hidden;
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault();
-    const delta = event.key === 'ArrowDown' ? 1 : -1;
-    state.logs.selectedSuggestion = (state.logs.selectedSuggestion + delta + state.logs.suggestions.length) % state.logs.suggestions.length;
-    renderCommandSuggestions();
+    if (suggestionsOpen) {
+      const delta = event.key === 'ArrowDown' ? 1 : -1;
+      state.logs.selectedSuggestion = (state.logs.selectedSuggestion + delta + state.logs.suggestions.length) % state.logs.suggestions.length;
+      renderCommandSuggestions();
+    } else {
+      navigateCommandHistory(event.key === 'ArrowUp' ? 1 : -1);
+    }
     return;
   }
+  if (!suggestionsOpen) return;
   if (event.key === 'Escape') {
     $('#command-suggestions').hidden = true;
     return;
