@@ -1,6 +1,17 @@
-const state = { payload: null, management: null, busy: false, files: { scope: 'config', path: '', listing: null, editing: null, tree: {} }, logs: { payload: null, commands: [], filter: 'all', follow: true, busy: false, commandBusy: false } };
+const state = { payload: null, management: null, busy: false, whitelist: [], files: { scope: 'config', path: '', listing: null, editing: null, tree: {} }, logs: { payload: null, commands: [], filter: 'all', follow: true, busy: false, commandBusy: false, suggestions: [], selectedSuggestion: 0 } };
 let whitelistLoaded = false;
 const $ = (selector) => document.querySelector(selector);
+const commandCatalog = [
+  ['list', 'Show online players'], ['say <message>', 'Broadcast a server message'], ['seed', 'Show the current world seed'],
+  ['time set day', 'Set daytime'], ['time set night', 'Set nighttime'], ['weather clear', 'Clear the weather'], ['weather rain', 'Start rain'], ['weather thunder', 'Start a thunderstorm'],
+  ['difficulty peaceful', 'Set peaceful difficulty'], ['difficulty easy', 'Set easy difficulty'], ['difficulty normal', 'Set normal difficulty'], ['difficulty hard', 'Set hard difficulty'],
+  ['gamemode survival <player>', 'Set player to survival'], ['gamemode creative <player>', 'Set player to creative'], ['gamemode adventure <player>', 'Set player to adventure'], ['gamemode spectator <player>', 'Set player to spectator'],
+  ['give <player> minecraft:<item> [count]', 'Give an item'], ['tp <player> <target|x y z>', 'Teleport a player'], ['effect give <player> minecraft:<effect> [seconds] [amplifier]', 'Apply an effect'], ['effect clear <player>', 'Clear player effects'],
+  ['clear <player>', 'Clear inventory'], ['kill <player>', 'Kill a player'], ['kick <player> [reason]', 'Disconnect a player'], ['ban <player> [reason]', 'Ban a player'], ['pardon <player>', 'Remove a player ban'],
+  ['op <player>', 'Grant operator access'], ['deop <player>', 'Remove operator access'], ['whitelist list', 'Show allowed players'], ['whitelist add <player>', 'Allow a player'], ['whitelist remove <player>', 'Remove an allowed player'],
+  ['gamerule keepInventory true', 'Keep inventory after death'], ['gamerule keepInventory false', 'Drop inventory after death'], ['gamerule doDaylightCycle true', 'Enable day cycle'], ['gamerule doDaylightCycle false', 'Freeze day cycle'], ['gamerule mobGriefing true', 'Allow mob block changes'], ['gamerule mobGriefing false', 'Prevent mob block changes'],
+  ['setworldspawn', 'Set world spawn here'], ['spawnpoint <player>', 'Set player spawn here'], ['experience add <player> <amount> points', 'Give experience points'], ['enchant <player> minecraft:<enchantment> [level]', 'Enchant held item'],
+];
 const fileScopes = [
   { name: 'config', label: 'config', group: 'MINECRAFT' },
   { name: 'datapacks', label: 'datapacks', group: 'MINECRAFT' },
@@ -142,6 +153,47 @@ async function refreshLatestLog() {
 function renderCommandHistory() {
   const entries = state.logs.commands;
   $('#command-history').innerHTML = entries.length ? entries.map((entry) => `<article class="command-entry ${entry.ok ? 'success' : 'failed'}"><div><time>${new Date(entry.startedAt).toLocaleTimeString()}</time><code>&gt; ${escapeHtml(entry.command)}</code><small>${escapeHtml(entry.actor)}</small></div><pre>${escapeHtml(entry.output)}</pre></article>`).join('') : '<div class="command-empty">No web commands in recent history.</div>';
+}
+
+function availableCommandSuggestions() {
+  const players = [...new Set([...state.whitelist, '@a', '@p'])];
+  const catalog = commandCatalog.flatMap(([template, description]) => template.includes('<player>')
+    ? players.map((player) => ({ value: template.replace('<player>', player), description }))
+    : [{ value: template, description }]);
+  const recent = state.logs.commands.map((entry) => ({ value: entry.command, description: 'Recent command' }));
+  return [...new Map([...recent, ...catalog].map((item) => [item.value, item])).values()];
+}
+
+function renderCommandSuggestions() {
+  const node = $('#command-suggestions');
+  const input = $('#command-input').value.trim().replace(/^\/+/, '').toLowerCase();
+  if (!input || $('#command-input').disabled) {
+    node.hidden = true;
+    state.logs.suggestions = [];
+    return;
+  }
+  const lastToken = input.split(/\s+/).at(-1);
+  const suggestions = availableCommandSuggestions().map((item) => {
+    const value = item.value.toLowerCase();
+    return { ...item, score: value.startsWith(input) ? 0 : value.split(/\s+/).some((token) => token.startsWith(lastToken)) ? 1 : 2 };
+  }).filter((item) => item.score < 2).sort((left, right) => left.score - right.score || left.value.localeCompare(right.value)).slice(0, 8);
+  state.logs.suggestions = suggestions;
+  state.logs.selectedSuggestion = Math.min(state.logs.selectedSuggestion, Math.max(0, suggestions.length - 1));
+  node.hidden = suggestions.length === 0;
+  node.innerHTML = suggestions.map((item, index) => `<button type="button" class="${index === state.logs.selectedSuggestion ? 'active' : ''}" data-command-suggestion="${index}"><code>${escapeHtml(item.value)}</code><small>${escapeHtml(item.description)}</small></button>`).join('');
+}
+
+function applyCommandSuggestion(index = state.logs.selectedSuggestion) {
+  const suggestion = state.logs.suggestions[index];
+  if (!suggestion) return false;
+  const input = $('#command-input');
+  input.value = suggestion.value;
+  $('#command-suggestions').hidden = true;
+  const placeholder = input.value.indexOf('<');
+  input.focus();
+  if (placeholder >= 0) input.setSelectionRange(placeholder, input.value.indexOf('>', placeholder) + 1);
+  else input.setSelectionRange(input.value.length, input.value.length);
+  return true;
 }
 
 async function refreshCommandHistory() {
@@ -343,7 +395,7 @@ $('#publish-button').addEventListener('click', async () => {
 });
 
 async function refreshWhitelist() {
-  try { const result = await api('/api/admin/minecraft/whitelist'); $('#whitelist-output').textContent = result.message || result.players?.join(', ') || 'Whitelist is empty.'; }
+  try { const result = await api('/api/admin/minecraft/whitelist'); state.whitelist = result.players || []; $('#whitelist-output').textContent = result.message || state.whitelist.join(', ') || 'Whitelist is empty.'; }
   catch (error) { $('#whitelist-output').textContent = error.message; }
 }
 
@@ -527,6 +579,41 @@ $('#command-form').addEventListener('submit', async (event) => {
     render();
     if (!input.disabled) input.focus();
   }
+});
+$('#command-input').addEventListener('input', () => { state.logs.selectedSuggestion = 0; renderCommandSuggestions(); });
+$('#command-input').addEventListener('focus', renderCommandSuggestions);
+$('#command-input').addEventListener('keydown', (event) => {
+  if (!state.logs.suggestions.length || $('#command-suggestions').hidden) return;
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    const delta = event.key === 'ArrowDown' ? 1 : -1;
+    state.logs.selectedSuggestion = (state.logs.selectedSuggestion + delta + state.logs.suggestions.length) % state.logs.suggestions.length;
+    renderCommandSuggestions();
+    return;
+  }
+  if (event.key === 'Escape') {
+    $('#command-suggestions').hidden = true;
+    return;
+  }
+  if (event.key === 'Tab' || event.key === 'Enter') {
+    const suggestion = state.logs.suggestions[state.logs.selectedSuggestion];
+    const exactRunnable = event.key === 'Enter' && suggestion && !/[<\[]/.test(suggestion.value) && $('#command-input').value.trim().replace(/^\/+/, '') === suggestion.value;
+    if (exactRunnable) {
+      $('#command-suggestions').hidden = true;
+      return;
+    }
+    event.preventDefault();
+    applyCommandSuggestion();
+  }
+});
+$('#command-suggestions').addEventListener('mousedown', (event) => {
+  const button = event.target.closest('[data-command-suggestion]');
+  if (!button) return;
+  event.preventDefault();
+  applyCommandSuggestion(Number(button.dataset.commandSuggestion));
+});
+document.addEventListener('mousedown', (event) => {
+  if (!event.target.closest('.command-console')) $('#command-suggestions').hidden = true;
 });
 
 const sections = [...document.querySelectorAll('.section-block')];
