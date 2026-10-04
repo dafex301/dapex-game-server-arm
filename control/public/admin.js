@@ -2,15 +2,20 @@ const state = { payload: null, management: null, busy: false, whitelist: [], fil
 let whitelistLoaded = false;
 const $ = (selector) => document.querySelector(selector);
 const commandCatalog = [
-  ['list', 'Show online players'], ['say <message>', 'Broadcast a server message'], ['seed', 'Show the current world seed'],
-  ['time set day', 'Set daytime'], ['time set night', 'Set nighttime'], ['weather clear', 'Clear the weather'], ['weather rain', 'Start rain'], ['weather thunder', 'Start a thunderstorm'],
+  ['advancement grant <player> everything', 'Grant all advancements'], ['advancement revoke <player> everything', 'Revoke all advancements'],
+  ['attribute <player> minecraft:<attribute> get [scale]', 'Read an attribute value'], ['attribute <player> minecraft:<attribute> base get [scale]', 'Read an attribute base value'], ['attribute <player> minecraft:<attribute> base set <value>', 'Set an attribute base value'], ['attribute <player> minecraft:<attribute> base reset', 'Reset an attribute base value'], ['attribute <player> minecraft:<attribute> modifier remove <uuid>', 'Remove an attribute modifier'],
+  ['ban <player> [reason]', 'Ban a player'], ['ban-ip <address|player> [reason]', 'Ban an IP address'], ['banlist [players|ips]', 'Show server bans'], ['bossbar list', 'List custom boss bars'],
+  ['clear <player> [item] [maxCount]', 'Clear inventory items'], ['clone <begin> <end> <destination>', 'Clone blocks'], ['damage <player> <amount> [damageType]', 'Damage an entity'], ['data get entity <player> [path]', 'Read entity NBT'], ['datapack list [available|enabled]', 'List data packs'], ['debug start', 'Start debug profiling'], ['defaultgamemode <mode>', 'Set the default game mode'], ['deop <player>', 'Remove operator access'],
   ['difficulty peaceful', 'Set peaceful difficulty'], ['difficulty easy', 'Set easy difficulty'], ['difficulty normal', 'Set normal difficulty'], ['difficulty hard', 'Set hard difficulty'],
+  ['effect give <player> minecraft:<effect> [seconds] [amplifier]', 'Apply an effect'], ['effect clear <player> [effect]', 'Clear player effects'], ['enchant <player> minecraft:<enchantment> [level]', 'Enchant held item'], ['execute as <player> at @s run <command>', 'Run a command as a player'], ['experience add <player> <amount> points', 'Give experience points'], ['experience set <player> <amount> levels', 'Set experience levels'],
+  ['fill <from> <to> minecraft:<block>', 'Fill an area with blocks'], ['fillbiome <from> <to> minecraft:<biome>', 'Replace biomes in an area'], ['forceload query', 'List force-loaded chunks'], ['function minecraft:<function>', 'Run a data-pack function'],
   ['gamemode survival <player>', 'Set player to survival'], ['gamemode creative <player>', 'Set player to creative'], ['gamemode adventure <player>', 'Set player to adventure'], ['gamemode spectator <player>', 'Set player to spectator'],
-  ['give <player> minecraft:<item> [count]', 'Give an item'], ['tp <player> <target|x y z>', 'Teleport a player'], ['effect give <player> minecraft:<effect> [seconds] [amplifier]', 'Apply an effect'], ['effect clear <player>', 'Clear player effects'],
-  ['clear <player>', 'Clear inventory'], ['kill <player>', 'Kill a player'], ['kick <player> [reason]', 'Disconnect a player'], ['ban <player> [reason]', 'Ban a player'], ['pardon <player>', 'Remove a player ban'],
-  ['op <player>', 'Grant operator access'], ['deop <player>', 'Remove operator access'], ['whitelist list', 'Show allowed players'], ['whitelist add <player>', 'Allow a player'], ['whitelist remove <player>', 'Remove an allowed player'],
-  ['gamerule keepInventory true', 'Keep inventory after death'], ['gamerule keepInventory false', 'Drop inventory after death'], ['gamerule doDaylightCycle true', 'Enable day cycle'], ['gamerule doDaylightCycle false', 'Freeze day cycle'], ['gamerule mobGriefing true', 'Allow mob block changes'], ['gamerule mobGriefing false', 'Prevent mob block changes'],
-  ['setworldspawn', 'Set world spawn here'], ['spawnpoint <player>', 'Set player spawn here'], ['experience add <player> <amount> points', 'Give experience points'], ['enchant <player> minecraft:<enchantment> [level]', 'Enchant held item'],
+  ['gamerule keepInventory true', 'Keep inventory after death'], ['gamerule keepInventory false', 'Drop inventory after death'], ['gamerule doDaylightCycle true', 'Enable day cycle'], ['gamerule doDaylightCycle false', 'Freeze day cycle'], ['gamerule doWeatherCycle true', 'Enable weather cycle'], ['gamerule doWeatherCycle false', 'Freeze weather cycle'], ['gamerule mobGriefing true', 'Allow mob block changes'], ['gamerule mobGriefing false', 'Prevent mob block changes'],
+  ['give <player> minecraft:<item> [count]', 'Give an item'], ['help [command]', 'Show server command help'], ['item replace entity <player> <slot> with minecraft:<item>', 'Replace an inventory slot'], ['jfr start', 'Start Java Flight Recorder'], ['kick <player> [reason]', 'Disconnect a player'], ['kill <player>', 'Kill a player'], ['list', 'Show online players'], ['locate structure minecraft:<structure>', 'Find the nearest structure'], ['locate biome minecraft:<biome>', 'Find the nearest biome'], ['loot give <player> loot minecraft:<loot_table>', 'Give loot-table items'],
+  ['me <action>', 'Broadcast an action message'], ['msg <player> <message>', 'Send a private message'], ['op <player>', 'Grant operator access'], ['pardon <player>', 'Remove a player ban'], ['pardon-ip <address>', 'Remove an IP ban'], ['particle minecraft:<particle> [pos] [delta] [speed] [count]', 'Spawn particles'], ['place structure minecraft:<structure>', 'Place a configured structure'], ['playsound minecraft:<sound> master <player>', 'Play a sound'], ['random value <min>..<max>', 'Generate a random number'], ['recipe give <player> *', 'Unlock all recipes'], ['reload', 'Reload data packs'], ['ride <player> dismount', 'Dismount an entity'],
+  ['save-all flush', 'Save world data now'], ['save-on', 'Enable automatic world saves'], ['say <message>', 'Broadcast a server message'], ['schedule function minecraft:<function> <time>', 'Schedule a data-pack function'], ['scoreboard objectives list', 'List scoreboard objectives'], ['seed', 'Show the current world seed'], ['setblock <pos> minecraft:<block>', 'Set one block'], ['setidletimeout <minutes>', 'Set idle kick timeout'], ['setworldspawn', 'Set world spawn here'], ['spawnpoint <player>', 'Set player spawn here'], ['spectate <target> <player>', 'Make a player spectate an entity'], ['spreadplayers <center> <distance> <maxRange> false <player>', 'Spread players around an area'], ['stopsound <player> [source] [sound]', 'Stop a playing sound'], ['summon minecraft:<entity> [pos]', 'Summon an entity'],
+  ['tag <player> list', 'List entity tags'], ['tag <player> add <name>', 'Add an entity tag'], ['team list', 'List scoreboard teams'], ['teammsg <message>', 'Message your team'], ['teleport <player> <target|x y z>', 'Teleport a player'], ['tellraw <player> <json>', 'Send a JSON chat message'], ['tick query', 'Show server tick status'], ['time set day', 'Set daytime'], ['time set night', 'Set nighttime'], ['time set noon', 'Set noon'], ['time set midnight', 'Set midnight'], ['title <player> title <json>', 'Show a title'], ['transfer <host> [port] <player>', 'Transfer players to another server'], ['trigger <objective> [add|set] [value]', 'Change a trigger score'],
+  ['weather clear', 'Clear the weather'], ['weather rain', 'Start rain'], ['weather thunder', 'Start a thunderstorm'], ['whitelist list', 'Show allowed players'], ['whitelist add <player>', 'Allow a player'], ['whitelist remove <player>', 'Remove an allowed player'], ['worldborder get', 'Show world-border size'], ['worldborder set <distance> [time]', 'Set world-border size'],
 ];
 const fileScopes = [
   { name: 'config', label: 'config', group: 'MINECRAFT' },
@@ -80,7 +85,7 @@ function render() {
   const commandReady = status.active === 'minecraft' && status.containers.minecraft.running && status.containers.minecraft.health === 'healthy';
   $('#command-input').disabled = !commandReady;
   $('#command-form button').disabled = !commandReady || state.logs.commandBusy;
-  $('#command-input').placeholder = commandReady ? 'time set day, list, give D_Apex minecraft:diamond 64…' : 'Start Minecraft and wait until it is healthy';
+  $('#command-input').placeholder = commandReady ? 'Chat message, or /command…' : 'Start Minecraft and wait until it is healthy';
   $('#release-badge').textContent = `v${active.release} active · draft`;
   $('#profile-name').textContent = draft.name;
   $('#minecraft-version').value = draft.minecraftVersion;
@@ -166,28 +171,28 @@ function availableCommandSuggestions() {
 
 function renderCommandSuggestions() {
   const node = $('#command-suggestions');
-  const input = $('#command-input').value.trim().replace(/^\/+/, '').toLowerCase();
-  if (!input || $('#command-input').disabled) {
+  const raw = $('#command-input').value.trimStart();
+  if (!raw.startsWith('/') || $('#command-input').disabled) {
     node.hidden = true;
     state.logs.suggestions = [];
     return;
   }
-  const lastToken = input.split(/\s+/).at(-1);
-  const suggestions = availableCommandSuggestions().map((item) => {
-    const value = item.value.toLowerCase();
-    return { ...item, score: value.startsWith(input) ? 0 : value.split(/\s+/).some((token) => token.startsWith(lastToken)) ? 1 : 2 };
-  }).filter((item) => item.score < 2).sort((left, right) => left.score - right.score || left.value.localeCompare(right.value)).slice(0, 8);
+  const input = raw.slice(1).toLowerCase();
+  const suggestions = availableCommandSuggestions()
+    .filter((item) => item.value.toLowerCase().startsWith(input))
+    .sort((left, right) => left.value.localeCompare(right.value))
+    .slice(0, 12);
   state.logs.suggestions = suggestions;
   state.logs.selectedSuggestion = Math.min(state.logs.selectedSuggestion, Math.max(0, suggestions.length - 1));
   node.hidden = suggestions.length === 0;
-  node.innerHTML = suggestions.map((item, index) => `<button type="button" class="${index === state.logs.selectedSuggestion ? 'active' : ''}" data-command-suggestion="${index}"><code>${escapeHtml(item.value)}</code><small>${escapeHtml(item.description)}</small></button>`).join('');
+  node.innerHTML = suggestions.map((item, index) => `<button type="button" class="${index === state.logs.selectedSuggestion ? 'active' : ''}" data-command-suggestion="${index}"><code>/${escapeHtml(item.value)}</code><small>${escapeHtml(item.description)}</small></button>`).join('');
 }
 
 function applyCommandSuggestion(index = state.logs.selectedSuggestion) {
   const suggestion = state.logs.suggestions[index];
   if (!suggestion) return false;
   const input = $('#command-input');
-  input.value = suggestion.value;
+  input.value = `/${suggestion.value}`;
   $('#command-suggestions').hidden = true;
   const placeholder = input.value.indexOf('<');
   input.focus();
@@ -558,8 +563,10 @@ $('#log-follow').addEventListener('click', (event) => {
 $('#command-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const input = $('#command-input');
-  const command = input.value.trim();
-  if (!command || state.logs.commandBusy) return;
+  const raw = input.value.trim();
+  if (!raw || state.logs.commandBusy) return;
+  if (/^\/+\s*$/.test(raw)) return toast('Type a command after /', true);
+  const command = raw.startsWith('/') ? raw : `say ${raw}`;
   state.logs.commandBusy = true;
   input.disabled = true;
   $('#command-form button').disabled = true;
