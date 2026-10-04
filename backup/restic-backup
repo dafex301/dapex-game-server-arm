@@ -18,6 +18,42 @@ need_config() {
   command -v "$restic_bin" >/dev/null 2>&1 || die "restic executable not found: $restic_bin"
 }
 run_restic() { "$restic_bin" "$@"; }
+apply_retention() {
+  run_restic forget --prune \
+    --tag dapex-game-server \
+    --keep-daily "${RESTIC_KEEP_DAILY:-4}" \
+    --keep-weekly "${RESTIC_KEEP_WEEKLY:-2}" \
+    --keep-monthly "${RESTIC_KEEP_MONTHLY:-2}" \
+    --keep-yearly "${RESTIC_KEEP_YEARLY:-1}"
+}
+enforce_repository_limit() {
+  local max_bytes=${RESTIC_MAX_REPOSITORY_BYTES:-7516192768}
+  local minimum_snapshots=${RESTIC_MIN_SNAPSHOTS:-2}
+  [[ $max_bytes =~ ^[0-9]+$ && $max_bytes -gt 0 ]] || die 'RESTIC_MAX_REPOSITORY_BYTES must be a positive integer'
+  [[ $minimum_snapshots =~ ^[0-9]+$ && $minimum_snapshots -ge 1 ]] || die 'RESTIC_MIN_SNAPSHOTS must be a positive integer'
+  command -v jq >/dev/null 2>&1 || die 'jq is required to enforce the repository size budget'
+
+  local attempts=0 stats size snapshots count oldest
+  while (( attempts < 100 )); do
+    stats=$(run_restic stats --mode raw-data --json --tag dapex-game-server)
+    size=$(jq -er '.total_size | numbers' <<<"$stats") || die 'could not read repository size from restic stats'
+    if (( size <= max_bytes )); then
+      printf 'offsite-backup: repository uses %s of %s bytes\n' "$size" "$max_bytes"
+      return
+    fi
+
+    snapshots=$(run_restic snapshots --json --tag dapex-game-server)
+    count=$(jq -er 'length' <<<"$snapshots") || die 'could not count restic snapshots'
+    if (( count <= minimum_snapshots )); then
+      die "repository uses $size bytes, above the $max_bytes byte budget, but the newest $minimum_snapshots snapshots are protected"
+    fi
+    oldest=$(jq -er 'sort_by(.time) | .[0].id' <<<"$snapshots") || die 'could not select the oldest restic snapshot'
+    printf 'offsite-backup: pruning oldest snapshot %s to enforce %s byte budget\n' "${oldest:0:8}" "$max_bytes"
+    run_restic forget --prune "$oldest"
+    attempts=$((attempts + 1))
+  done
+  die 'repository size budget could not be reached after 100 prune attempts'
+}
 
 command=${1:-backup}
 case "$command" in
@@ -61,12 +97,11 @@ case "$command" in
     ;;
   forget)
     need_config
-    run_restic forget --prune \
-      --tag dapex-game-server \
-      --keep-daily "${RESTIC_KEEP_DAILY:-7}" \
-      --keep-weekly "${RESTIC_KEEP_WEEKLY:-5}" \
-      --keep-monthly "${RESTIC_KEEP_MONTHLY:-12}" \
-      --keep-yearly "${RESTIC_KEEP_YEARLY:-2}"
+    apply_retention
+    ;;
+  enforce-limit)
+    need_config
+    enforce_repository_limit
     ;;
   check)
     need_config
@@ -77,6 +112,6 @@ case "$command" in
     run_restic snapshots --tag dapex-game-server
     ;;
   *)
-    die 'usage: restic-backup {init|backup|forget|check|snapshots}'
+    die 'usage: restic-backup {init|backup|forget|enforce-limit|check|snapshots}'
     ;;
 esac

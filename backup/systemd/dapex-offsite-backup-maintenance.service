@@ -11,9 +11,9 @@ WorkingDirectory=@DEPLOY_DIR@
 Environment=BACKUP_PROJECT_ROOT=@DEPLOY_DIR@
 EnvironmentFile=/etc/dapex-game-backup.env
 ExecStart=/usr/local/sbin/dapex-restic-backup forget
+ExecStart=/usr/local/sbin/dapex-restic-backup enforce-limit
 ExecStart=/usr/local/sbin/dapex-restic-backup check
 Nice=15
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
 TimeoutStartSec=6h
-

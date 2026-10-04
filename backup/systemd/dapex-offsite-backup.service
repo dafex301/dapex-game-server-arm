@@ -13,8 +13,8 @@ Environment=BACKUP_PROJECT_ROOT=@DEPLOY_DIR@
 Environment=OFFSITE_BACKUP_LOCK=@DEPLOY_DIR@/.offsite-backup.lock
 EnvironmentFile=/etc/dapex-game-backup.env
 ExecStart=/usr/local/sbin/dapex-restic-backup backup
+ExecStart=/usr/local/sbin/dapex-restic-backup enforce-limit
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
 TimeoutStartSec=45min
-

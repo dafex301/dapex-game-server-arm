@@ -64,7 +64,12 @@ the desired `persistentdata` or `minecraft/data` tree using the same ownership
 as the existing deployment. A backup is not considered proven until a test
 restore has been performed.
 
-The daily timer runs at 04:15 Asia/Jakarta. The weekly timer applies retention
-(7 daily, 5 weekly, 12 monthly, 2 yearly by default), prunes unreferenced data,
-and reads a random 5% of repository data. Set `RESTIC_CHECK_SUBSET=100%` for a
-full check during a planned maintenance window.
+The daily timer runs at 04:15 Asia/Jakarta. Each daily upload enforces a 7 GiB
+repository budget, pruning the oldest snapshot when necessary while preserving
+at least the newest two. The weekly timer applies retention (4 daily, 2 weekly,
+2 monthly, and 1 yearly by default), enforces the same byte budget, prunes
+unreferenced data, and reads a random 5% of repository data. The 7 GiB cap leaves
+headroom beneath R2 Standard's 10 GB-month free tier for repository metadata and
+billing-unit differences. Set `RESTIC_CHECK_SUBSET=100%` for a full check during
+a planned maintenance window. Never add a generic R2 lifecycle deletion rule to
+this bucket: Restic must remove snapshots and encrypted pack objects itself.

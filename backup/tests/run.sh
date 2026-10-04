@@ -10,6 +10,10 @@ printf 'secret\n' > "$tmp/password"
 cat > "$tmp/bin/restic" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$RESTIC_TEST_LOG"
+case "$1" in
+  stats) printf '{"total_size":948533274}\n' ;;
+  snapshots) printf '[{"id":"aaaaaaaaaaaaaaaa","time":"2026-10-01T00:00:00Z"},{"id":"bbbbbbbbbbbbbbbb","time":"2026-10-02T00:00:00Z"}]\n' ;;
+esac
 SH
 cat > "$tmp/bin/flock" <<'SH'
 #!/usr/bin/env bash
@@ -65,7 +69,27 @@ fi
 [[ -e "$tmp/project/backups/minecraft/minecraft-test.tar.gz" ]]
 
 env "${common[@]}" "$repo_root/backup/restic-backup" forget
-grep -q '^forget --prune --tag dapex-game-server --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --keep-yearly 2$' "$tmp/restic.log"
+grep -q '^forget --prune --tag dapex-game-server --keep-daily 4 --keep-weekly 2 --keep-monthly 2 --keep-yearly 1$' "$tmp/restic.log"
+env "${common[@]}" "$repo_root/backup/restic-backup" enforce-limit
+grep -q '^stats --mode raw-data --json --tag dapex-game-server$' "$tmp/restic.log"
+
+cat > "$tmp/bin/restic-limit" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$RESTIC_TEST_LOG"
+case "$1" in
+  stats)
+    [[ -e $RESTIC_LIMIT_PRUNED ]] && printf '{"total_size":7000000000}\n' || printf '{"total_size":8000000000}\n'
+    ;;
+  snapshots)
+    printf '[{"id":"aaaaaaaaaaaaaaaa","time":"2026-10-01T00:00:00Z"},{"id":"bbbbbbbbbbbbbbbb","time":"2026-10-02T00:00:00Z"},{"id":"cccccccccccccccc","time":"2026-10-03T00:00:00Z"}]\n'
+    ;;
+  forget) touch "$RESTIC_LIMIT_PRUNED" ;;
+esac
+SH
+chmod +x "$tmp/bin/restic-limit"
+env "${common[@]}" RESTIC_BIN="$tmp/bin/restic-limit" RESTIC_LIMIT_PRUNED="$tmp/pruned" "$repo_root/backup/restic-backup" enforce-limit
+grep -q '^forget --prune aaaaaaaaaaaaaaaa$' "$tmp/restic.log"
+
 env "${common[@]}" "$repo_root/backup/restic-backup" check
 grep -q '^check --read-data-subset=5%$' "$tmp/restic.log"
 
